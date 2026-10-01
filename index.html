@@ -99,7 +99,8 @@ const $ = (id) => document.getElementById(id);
 const statusEl = $('status'), logEl = $('log'), resultEl = $('result');
 const SKIP_DIRS = ['auto saves', 'backups', '__macosx', 'images', 'track pictures', '.git'];
 const SKIP_EXT = ['.peak', '.reapeaks', '.csh', '.ds_store'];
-let ready = false, busy = false, url = null;
+let ready = false, busy = false, url = null, pending = null;
+const WAIT = 'The converter is still loading — your project will be read as soon as it is ready.';
 
 function setStatus(text, cls) { statusEl.textContent = text; statusEl.className = cls || ''; }
 
@@ -115,11 +116,13 @@ function addLog(t) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-const worker = new Worker('worker.js?v=f29878b4f9');
+const worker = new Worker('worker.js?v=68c308cc70');
 worker.onmessage = (e) => {
   const m = e.data;
   if (m.type === 'status') setStatus(m.text);
-  else if (m.type === 'ready') { ready = true; setStatus('Ready. Drop a project folder or a .zip.'); }
+  else if (m.type === 'ready') { ready = true; setStatus('Ready. Drop a project folder or a .zip.');
+    // something dropped while the converter was still loading
+    if (pending) { const run = pending; pending = null; run(); } }
   else if (m.type === 'log') addLog(m.text);
   else if (m.type === 'projects') showProjects(m.list);
   else if (m.type === 'done') done(m);
@@ -136,7 +139,7 @@ function skip(path) {
 }
 
 async function sendFiles(list) {   // list: [{path, file}]
-  if (!ready) { setStatus('Still loading — try again in a moment.'); return; }
+  if (!ready) { pending = () => sendFiles(list); setStatus(WAIT); return; }
   list = list.filter((f) => !skip(f.path));
   if (!list.length) { setStatus('No files found there.', 'bad'); return; }
   const mb = list.reduce((s, f) => s + f.file.size, 0) / 1e6;
@@ -148,7 +151,7 @@ async function sendFiles(list) {   // list: [{path, file}]
 }
 
 async function sendZip(file) {
-  if (!ready) { setStatus('Still loading — try again in a moment.'); return; }
+  if (!ready) { pending = () => sendZip(file); setStatus(WAIT); return; }
   setStatus(`Reading ${file.name} (${(file.size / 1e6).toFixed(0)} MB)…`);
   const zip = await file.arrayBuffer();
   resetRun();

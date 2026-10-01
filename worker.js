@@ -26,7 +26,7 @@ async function boot() {
   });
   ff.setLogger(({ message }) => ffLog.push(message));
   post('status', { text: 'Loading the converter…' });
-  const z = await (await fetch('converter.zip?v=f29878b4f9', { cache: 'no-cache' })).arrayBuffer();
+  const z = await (await fetch('converter.zip?v=68c308cc70', { cache: 'no-cache' })).arrayBuffer();
   py.FS.writeFile('/tmp/converter.zip', new Uint8Array(z));
   py.runPython(`
 import zipfile, sys
@@ -104,9 +104,23 @@ async function load(msg) {
   if (msg.zip) {
     py.FS.writeFile('/tmp/in.zip', new Uint8Array(msg.zip));
     py.runPython(`
-import zipfile, os
+import zipfile, os, shutil
 with zipfile.ZipFile('/tmp/in.zip') as z:
-    z.extractall('${ROOT}')
+    # some Windows zip tools (PowerShell's Compress-Archive among them)
+    # write folders with backslashes, which a posix system takes for part
+    # of the file name: SUPERKUR\\Audio\\x.wav as one file
+    for info in z.infolist():
+        name = info.filename.replace('\\\\', '/')
+        parts = [p for p in name.split('/') if p not in ('', '.', '..')]
+        if not parts:
+            continue
+        dest = os.path.join('${ROOT}', *parts)
+        if name.endswith('/'):
+            os.makedirs(dest, exist_ok=True)
+            continue
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with z.open(info) as src, open(dest, 'wb') as out:
+            shutil.copyfileobj(src, out, 1 << 20)
 os.remove('/tmp/in.zip')
 `);
   } else {
