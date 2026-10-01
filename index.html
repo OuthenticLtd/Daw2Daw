@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DAW Converter</title>
+<meta name="description" content="Convert Cubase projects to REAPER and REAPER projects to Cubase, in your browser. Nothing is uploaded.">
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1f23; --muted: #646a73; --line: #e2e0da;
+    --accent: #c4531d; --accent-ink: #ffffff; --ok: #2f7d4f; --bad: #b3261e; --log: #f0eee9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15171a; --panel: #1d2024; --ink: #eceae6; --muted: #9aa0a8; --line: #2e3238;
+      --accent: #e8743d; --accent-ink: #15171a; --ok: #5cc28a; --bad: #ff8a80; --log: #121417;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+  #drop { border: 2px dashed var(--line); border-radius: 10px; padding: 32px 16px; text-align: center;
+          transition: border-color .15s, background .15s; }
+  #drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  #drop strong { display: block; font-size: 18px; margin-bottom: 6px; }
+  #drop p { margin: 0 0 16px; color: var(--muted); }
+  button, .btn { font: inherit; border-radius: 8px; border: 1px solid var(--line); background: var(--panel);
+                 color: var(--ink); padding: 9px 16px; cursor: pointer; }
+  button.primary, a.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent);
+                              font-weight: 600; text-decoration: none; display: inline-block; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  #step2 { margin-top: 18px; display: none; }
+  #step2 label { display: block; font-weight: 600; margin-bottom: 6px; }
+  select { font: inherit; width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--ink); margin-bottom: 12px; }
+  #status { margin: 14px 0 0; color: var(--muted); min-height: 1.5em; }
+  #status.ok { color: var(--ok); } #status.bad { color: var(--bad); }
+  pre#log { display: none; margin: 16px 0 0; background: var(--log); border: 1px solid var(--line);
+            border-radius: 8px; padding: 12px; max-height: 340px; overflow: auto; font-size: 12.5px;
+            line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+  #result { margin-top: 16px; display: none; text-align: center; }
+  h2 { font-size: 17px; margin: 28px 0 8px; }
+  ul { margin: 0; padding-left: 20px; color: var(--muted); }
+  li { margin: 4px 0; }
+  footer { margin-top: 28px; color: var(--muted); font-size: 13px; }
+  code { font-size: .92em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>DAW Converter</h1>
+  <p class="sub">Cubase ⇄ REAPER. Runs in your browser — your project never leaves your computer.</p>
+
+  <div class="panel">
+    <div id="drop">
+      <strong>Drop your project folder or a .zip of it here</strong>
+      <p>The folder with the .cpr or .rpp and its audio. You get the converted project back as a zip, with every file it uses.</p>
+      <div class="row">
+        <button id="pickFolder">Choose folder…</button>
+        <button id="pickZip">Choose .zip…</button>
+      </div>
+      <input id="folderInput" type="file" webkitdirectory directory multiple hidden>
+      <input id="zipInput" type="file" accept=".zip" hidden>
+    </div>
+
+    <div id="step2">
+      <label for="project">Project to convert</label>
+      <select id="project"></select>
+      <div class="row"><button class="primary" id="go">Convert</button></div>
+    </div>
+
+    <p id="status">Starting…</p>
+    <pre id="log"></pre>
+    <div id="result"></div>
+  </div>
+
+  <h2>Good to know</h2>
+  <ul>
+    <li>Cubase → REAPER and REAPER → Cubase: tracks, audio, MIDI, fades, automation, stretch, pitch, reverse,
+        warp markers and Melodyne edits come across natively; nothing is printed to audio.</li>
+    <li>Each DAW's built-in effects become the other's closest built-in effects. EQ, volume, pan and width match;
+        compressors, limiters, reverbs and the like are close, not identical.</li>
+    <li>Third-party plug-ins keep their settings; they must be installed where you open the converted project.</li>
+    <li>The first visit downloads about 50 MB (Python and ffmpeg for the browser); after that they are cached.
+        Large projects need a computer with enough memory (roughly three times the project's size).</li>
+  </ul>
+  <footer>Uses <a href="https://pyodide.org">Pyodide</a> and <a href="https://ffmpegwasm.netlify.app">ffmpeg.wasm</a> (ffmpeg is GPL/LGPL).</footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const statusEl = $('status'), logEl = $('log'), resultEl = $('result');
+const SKIP_DIRS = ['auto saves', 'backups', '__macosx', 'images', 'track pictures', '.git'];
+const SKIP_EXT = ['.peak', '.reapeaks', '.csh', '.ds_store'];
+let ready = false, busy = false, url = null;
+
+function setStatus(text, cls) { statusEl.textContent = text; statusEl.className = cls || ''; }
+
+// the log redraws progress bars the way a terminal does (\r)
+let logText = '';
+function addLog(t) {
+  logEl.style.display = 'block';
+  for (const ch of t.split(/(\r|\n)/)) {
+    if (ch === '\r') logText = logText.slice(0, logText.lastIndexOf('\n') + 1);
+    else logText += ch;
+  }
+  logEl.textContent = logText;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+const worker = new Worker('worker.js?v=6fe229a363');
+worker.onmessage = (e) => {
+  const m = e.data;
+  if (m.type === 'status') setStatus(m.text);
+  else if (m.type === 'ready') { ready = true; setStatus('Ready. Drop a project folder or a .zip.'); }
+  else if (m.type === 'log') addLog(m.text);
+  else if (m.type === 'projects') showProjects(m.list);
+  else if (m.type === 'done') done(m);
+  else if (m.type === 'failed') { busy = false; $('go').disabled = false;
+    setStatus('The conversion failed — the log above says why.', 'bad'); }
+  else if (m.type === 'error') { busy = false; $('go').disabled = false; setStatus(m.text, 'bad'); }
+};
+
+function skip(path) {
+  const parts = path.toLowerCase().split('/');
+  if (parts.slice(0, -1).some((p) => SKIP_DIRS.includes(p))) return true;
+  const name = parts[parts.length - 1];
+  return SKIP_EXT.some((x) => name.endsWith(x)) || /\.bak$/.test(name) && !/\.cpr$/.test(name) && false;
+}
+
+async function sendFiles(list) {   // list: [{path, file}]
+  if (!ready) { setStatus('Still loading — try again in a moment.'); return; }
+  list = list.filter((f) => !skip(f.path));
+  if (!list.length) { setStatus('No files found there.', 'bad'); return; }
+  const mb = list.reduce((s, f) => s + f.file.size, 0) / 1e6;
+  setStatus(`Reading ${list.length} file(s), ${mb.toFixed(0)} MB…`);
+  const files = [], transfer = [];
+  for (const f of list) { const data = await f.file.arrayBuffer(); files.push({ path: f.path, data }); transfer.push(data); }
+  resetRun();
+  worker.postMessage({ type: 'load', files }, transfer);
+}
+
+async function sendZip(file) {
+  if (!ready) { setStatus('Still loading — try again in a moment.'); return; }
+  setStatus(`Reading ${file.name} (${(file.size / 1e6).toFixed(0)} MB)…`);
+  const zip = await file.arrayBuffer();
+  resetRun();
+  worker.postMessage({ type: 'load', zip }, [zip]);
+}
+
+function resetRun() {
+  logText = ''; logEl.textContent = ''; logEl.style.display = 'none';
+  resultEl.style.display = 'none'; resultEl.innerHTML = '';
+  if (url) { URL.revokeObjectURL(url); url = null; }
+}
+
+function showProjects(list) {
+  const sel = $('project'); sel.innerHTML = '';
+  if (!list.length) { $('step2').style.display = 'none';
+    setStatus('No .cpr or .rpp project in there.', 'bad'); return; }
+  for (const p of list) { const o = document.createElement('option'); o.value = p;
+    o.textContent = p + (p.toLowerCase().endsWith('.cpr') ? '  →  REAPER' : '  →  Cubase'); sel.appendChild(o); }
+  $('step2').style.display = 'block';
+  setStatus(list.length === 1 ? 'Ready to convert.' : `${list.length} projects found — pick one.`);
+}
+
+$('go').onclick = () => {
+  if (busy) return;
+  busy = true; $('go').disabled = true; resetRun();
+  setStatus('Converting…');
+  worker.postMessage({ type: 'convert', project: $('project').value });
+};
+
+function done(m) {
+  busy = false; $('go').disabled = false;
+  const blob = new Blob([m.zip], { type: 'application/zip' });
+  url = URL.createObjectURL(blob);
+  resultEl.innerHTML = '';
+  const a = document.createElement('a'); a.href = url; a.download = m.name; a.className = 'btn primary';
+  a.textContent = `Download ${m.name} (${(blob.size / 1e6).toFixed(1)} MB)`;
+  resultEl.appendChild(a); resultEl.style.display = 'block';
+  setStatus(m.checked ? 'Converted, and the check found no differences.' :
+            'Converted. The check above lists what differs.', m.checked ? 'ok' : '');
+  a.click();
+}
+
+// ---- getting files in -----------------------------------------------------
+$('pickFolder').onclick = () => $('folderInput').click();
+$('pickZip').onclick = () => $('zipInput').click();
+$('folderInput').onchange = (e) => sendFiles([...e.target.files].map((f) => ({ path: f.webkitRelativePath || f.name, file: f })));
+$('zipInput').onchange = (e) => { if (e.target.files[0]) sendZip(e.target.files[0]); };
+
+const drop = $('drop');
+['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', async (e) => {
+  const items = [...e.dataTransfer.items].map((i) => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+  if (items.length === 1 && items[0].isFile && /\.zip$/i.test(items[0].name)) {
+    items[0].file((f) => sendZip(f)); return;
+  }
+  const out = [];
+  async function walk(entry, prefix) {
+    if (entry.isFile) {
+      const file = await new Promise((res, rej) => entry.file(res, rej));
+      out.push({ path: prefix + entry.name, file });
+    } else if (entry.isDirectory) {
+      if (SKIP_DIRS.includes(entry.name.toLowerCase())) return;
+      const reader = entry.createReader();
+      for (;;) {
+        const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+        if (!batch.length) break;
+        for (const child of batch) await walk(child, prefix + entry.name + '/');
+      }
+    }
+  }
+  setStatus('Reading the folder…');
+  for (const it of items) await walk(it, '');
+  sendFiles(out);
+});
+</script>
+</body>
+</html>
