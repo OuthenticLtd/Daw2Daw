@@ -5,94 +5,248 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DAW Converter</title>
 <meta name="description" content="Convert Cubase projects to REAPER and REAPER projects to Cubase, in your browser. Nothing is uploaded.">
+<meta name="color-scheme" content="light dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
   :root {
-    --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1f23; --muted: #646a73; --line: #e2e0da;
-    --accent: #c4531d; --accent-ink: #ffffff; --ok: #2f7d4f; --bad: #b3261e; --log: #f0eee9;
+    --bg: #f7f7f8; --bg-glow: #ececfb; --panel: #ffffff; --panel-2: #fafafb;
+    --ink: #111215; --ink-2: #3a3d45; --muted: #5f6470; --line: #e4e4e9; --line-2: #d3d4db;
+    --accent: #4f46e5; --accent-hover: #4338ca; --accent-ink: #ffffff;
+    --accent-soft: rgba(79, 70, 229, .08); --accent-ring: rgba(79, 70, 229, .35);
+    --ok: #18794e; --ok-soft: rgba(24, 121, 78, .09);
+    --bad: #c1272d; --bad-soft: rgba(193, 39, 45, .08);
+    --log: #0f1115; --log-ink: #d6d9e0; --log-line: #23262d;
+    --shadow-sm: 0 1px 2px rgba(17, 18, 21, .06);
+    --shadow: 0 1px 2px rgba(17, 18, 21, .05), 0 8px 24px -8px rgba(17, 18, 21, .10);
+    --radius: 14px;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #15171a; --panel: #1d2024; --ink: #eceae6; --muted: #9aa0a8; --line: #2e3238;
-      --accent: #e8743d; --accent-ink: #15171a; --ok: #5cc28a; --bad: #ff8a80; --log: #121417;
+      --bg: #0c0d10; --bg-glow: #17173a; --panel: #14161a; --panel-2: #181a1f;
+      --ink: #eef0f4; --ink-2: #c9ccd4; --muted: #9399a6; --line: #24272e; --line-2: #31353e;
+      --accent: #8b8dfb; --accent-hover: #a2a4ff; --accent-ink: #0c0d10;
+      --accent-soft: rgba(139, 141, 251, .10); --accent-ring: rgba(139, 141, 251, .45);
+      --ok: #4cc38a; --ok-soft: rgba(76, 195, 138, .10);
+      --bad: #ff7b7b; --bad-soft: rgba(255, 123, 123, .10);
+      --log: #090a0d; --log-ink: #c9ccd4; --log-line: #22252c;
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 32px -12px rgba(0, 0, 0, .6);
     }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
-  h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.01em; }
-  .sub { color: var(--muted); margin: 0 0 24px; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
-  #drop { border: 2px dashed var(--line); border-radius: 10px; padding: 32px 16px; text-align: center;
-          transition: border-color .15s, background .15s; }
-  #drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
-  #drop strong { display: block; font-size: 18px; margin-bottom: 6px; }
-  #drop p { margin: 0 0 16px; color: var(--muted); }
-  button, .btn { font: inherit; border-radius: 8px; border: 1px solid var(--line); background: var(--panel);
-                 color: var(--ink); padding: 9px 16px; cursor: pointer; }
-  button.primary, a.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent);
-                              font-weight: 600; text-decoration: none; display: inline-block; }
-  button:disabled { opacity: .5; cursor: default; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; min-height: 100vh; color: var(--ink);
+    background: var(--bg) radial-gradient(1100px 520px at 50% -180px, var(--bg-glow), transparent 70%) no-repeat;
+    font: 16px/1.55 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased; font-feature-settings: "cv11", "ss01";
+  }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  a:hover { color: var(--accent-hover); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 16px; }
+
+  /* header */
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 0; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+  .mark { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
+          background: var(--accent); color: var(--accent-ink); box-shadow: var(--shadow-sm); }
+  .tag { font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); background: var(--panel);
+         padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+
+  /* hero */
+  .hero { padding: 40px 0 32px; text-align: center; }
+  .formats { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 18px; font-size: 13px;
+             font-weight: 500; color: var(--ink-2); }
+  .formats code { font: 500 12.5px/1 "JetBrains Mono", ui-monospace, Consolas, monospace; padding: 5px 9px;
+                  border-radius: 7px; border: 1px solid var(--line); background: var(--panel); box-shadow: var(--shadow-sm); }
+  .formats svg { color: var(--accent); }
+  h1 { font-size: clamp(32px, 6vw, 48px); line-height: 1.08; letter-spacing: -0.035em; font-weight: 700;
+       margin: 0 auto 14px; max-width: 14ch; }
+  .sub { color: var(--muted); margin: 0 auto; max-width: 52ch; font-size: 17px; }
+  .local { display: inline-flex; align-items: center; gap: 7px; margin-top: 16px; font-size: 13.5px;
+           color: var(--ok); font-weight: 500; }
+
+  /* card */
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+          box-shadow: var(--shadow); padding: 8px; }
+  .card-body { padding: 4px 16px 18px; }
+
+  #drop { position: relative; border: 1.5px dashed var(--line-2); border-radius: 10px; padding: 40px 20px 32px;
+          text-align: center; background: var(--panel-2);
+          transition: border-color .18s ease, background-color .18s ease, transform .18s ease; }
+  #drop:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line-2)); }
+  #drop.over { border-color: var(--accent); border-style: solid; background: var(--accent-soft); transform: scale(1.005); }
+  #drop.over .drop-icon { transform: translateY(-3px); color: var(--accent); }
+  .drop-icon { width: 48px; height: 48px; margin: 0 auto 14px; border-radius: 12px; display: grid; place-items: center;
+               background: var(--panel); border: 1px solid var(--line); color: var(--ink-2); box-shadow: var(--shadow-sm);
+               transition: transform .18s ease, color .18s ease; }
+  #drop strong { display: block; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 6px; }
+  #drop p { margin: 0 auto 20px; color: var(--muted); font-size: 14.5px; max-width: 46ch; }
+
+  button, .btn { font: inherit; font-size: 14.5px; font-weight: 500; line-height: 1.2; border-radius: 9px;
+                 border: 1px solid var(--line-2); background: var(--panel); color: var(--ink);
+                 padding: 10px 16px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+                 gap: 8px; box-shadow: var(--shadow-sm); text-decoration: none;
+                 transition: background-color .15s, border-color .15s, box-shadow .15s, transform .08s; }
+  button:hover { border-color: var(--muted); }
+  button:active { transform: translateY(1px); }
+  button:focus-visible, .btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
+  button.primary, a.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent;
+                              font-weight: 600; }
+  button.primary:hover, a.primary:hover { background: var(--accent-hover); color: var(--accent-ink); }
+  button:disabled { opacity: .55; cursor: default; transform: none; }
+  button.primary:disabled:hover { background: var(--accent); }
   .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
-  #step2 { margin-top: 18px; display: none; }
-  #step2 label { display: block; font-weight: 600; margin-bottom: 6px; }
-  select { font: inherit; width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--line);
-           background: var(--panel); color: var(--ink); margin-bottom: 12px; }
-  #status { margin: 14px 0 0; color: var(--muted); min-height: 1.5em; }
-  #status.ok { color: var(--ok); } #status.bad { color: var(--bad); }
-  pre#log { display: none; margin: 16px 0 0; background: var(--log); border: 1px solid var(--line);
-            border-radius: 8px; padding: 12px; max-height: 340px; overflow: auto; font-size: 12.5px;
-            line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
-  #result { margin-top: 16px; display: none; text-align: center; }
-  #result .hint { margin: 14px 0 0; color: var(--muted); font-size: 14px; }
-  #result .warn { margin: 10px 0 0; color: var(--bad); font-size: 14px; }
-  h2 { font-size: 17px; margin: 28px 0 8px; }
-  ul { margin: 0; padding-left: 20px; color: var(--muted); }
-  li { margin: 4px 0; }
-  footer { margin-top: 28px; color: var(--muted); font-size: 13px; }
-  code { font-size: .92em; }
+
+  #step2 { display: none; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line);
+           animation: rise .25s ease both; }
+  #step2 label { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 8px; }
+  .pick { display: flex; gap: 10px; }
+  .select { position: relative; flex: 1; min-width: 0; }
+  .select::after { content: ""; position: absolute; right: 14px; top: 50%; width: 7px; height: 7px; margin-top: -6px;
+                   border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
+                   transform: rotate(45deg); pointer-events: none; }
+  select { font: 500 14px/1.2 "JetBrains Mono", ui-monospace, Consolas, monospace; width: 100%; height: 44px;
+           padding: 0 38px 0 14px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--panel);
+           color: var(--ink); -webkit-appearance: none; appearance: none; cursor: pointer;
+           box-shadow: var(--shadow-sm); text-overflow: ellipsis; transition: border-color .15s, box-shadow .15s; }
+  select:hover { border-color: var(--muted); }
+  select:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+  #go { height: 44px; padding: 0 22px; font-size: 15px; }
+  #go:disabled .go-arrow { display: none; }
+
+  /* status */
+  #status { display: flex; align-items: flex-start; gap: 10px; margin: 16px 0 0; padding: 10px 12px;
+            border-radius: 9px; font-size: 14.5px; color: var(--ink-2); min-height: 1.5em; background: transparent;
+            transition: background-color .2s, color .2s; }
+  #status::before { content: ""; flex: none; width: 8px; height: 8px; margin-top: .5em; border-radius: 50%;
+                    background: var(--muted); opacity: .6; }
+  #status.working::before { width: 13px; height: 13px; margin-top: .32em; background: none; opacity: 1;
+                            border: 2px solid var(--line-2); border-top-color: var(--accent);
+                            animation: spin .8s linear infinite; }
+  #status.ok { color: var(--ok); background: var(--ok-soft); }
+  #status.ok::before { background: var(--ok); opacity: 1; box-shadow: 0 0 0 3px var(--ok-soft); }
+  #status.bad { color: var(--bad); background: var(--bad-soft); }
+  #status.bad::before { background: var(--bad); opacity: 1; box-shadow: 0 0 0 3px var(--bad-soft); }
+
+  pre#log { display: none; margin: 12px 0 0; background: var(--log); color: var(--log-ink);
+            border: 1px solid var(--log-line); border-radius: 10px; padding: 14px 16px; max-height: 320px;
+            overflow: auto; font: 12.5px/1.6 "JetBrains Mono", ui-monospace, Consolas, monospace;
+            white-space: pre-wrap; word-break: break-word; animation: rise .25s ease both;
+            scrollbar-width: thin; scrollbar-color: #3a3e47 transparent; }
+
+  #result { display: none; margin-top: 14px; padding: 22px 20px; text-align: center; border-radius: 12px;
+            border: 1px solid color-mix(in srgb, var(--ok) 30%, var(--line)); background: var(--ok-soft);
+            animation: rise .3s ease both; }
+  #result .result-head { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 0 0 16px;
+                         font-weight: 600; font-size: 16px; color: var(--ink); }
+  #result .result-head span { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+                              background: var(--ok); color: var(--panel); }
+  #result .btn { font-size: 15.5px; padding: 13px 22px; max-width: 100%; overflow-wrap: anywhere;
+                 box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 6px 18px -6px var(--accent-ring); }
+  #result .hint { margin: 16px auto 0; color: var(--muted); font-size: 14px; max-width: 54ch; }
+  #result .hint strong { color: var(--ink); }
+  #result .warn { margin: 12px auto 0; color: var(--bad); font-size: 14px; max-width: 54ch; padding: 10px 12px;
+                  border-radius: 8px; background: var(--bad-soft); text-align: left; }
+
+  /* good to know */
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600;
+       margin: 48px 0 14px; }
+  .facts { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .facts li { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px;
+              font-size: 14.5px; color: var(--muted); }
+  .facts b { display: block; color: var(--ink); font-weight: 600; font-size: 14.5px; margin-bottom: 4px; }
+  footer { margin: 40px 0 0; padding: 20px 0 40px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+  code { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: .9em; }
+
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition: none !important; } }
+
+  @media (max-width: 600px) {
+    .hero { padding: 24px 0 24px; }
+    .sub { font-size: 16px; }
+    .tag { display: none; }
+    .card-body { padding: 4px 6px 10px; }
+    #drop { padding: 28px 14px 22px; }
+    .row button { flex: 1 1 140px; }
+    .pick { flex-direction: column; }
+    #go { width: 100%; }
+    .facts { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
-<main>
-  <h1>DAW Converter</h1>
-  <p class="sub">Cubase ⇄ REAPER. Runs in your browser — your project never leaves your computer.</p>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4 3 8l4 4"/><path d="M3 8h14"/><path d="m17 20 4-4-4-4"/><path d="M21 16H7"/></svg>
+      </span>
+      DAW Converter
+    </div>
+    <span class="tag">Free · runs in your browser</span>
+  </header>
 
-  <div class="panel">
+  <section class="hero">
+    <div class="formats" aria-label="Cubase to REAPER and back">
+      <code>Cubase .cpr</code>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4 3 8l4 4"/><path d="M3 8h14"/><path d="m17 20 4-4-4-4"/><path d="M21 16H7"/></svg>
+      <code>REAPER .rpp</code>
+    </div>
+    <h1>Move projects between Cubase and REAPER</h1>
+    <p class="sub">Drop a project folder and get the converted project back as a zip, with every file it uses.</p>
+    <div class="local">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+      Everything runs locally in your browser. Nothing is uploaded.
+    </div>
+  </section>
+
+  <main class="card">
     <div id="drop">
+      <div class="drop-icon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v6"/><path d="m9 13 3-3 3 3"/></svg>
+      </div>
       <strong>Drop your project folder or a .zip of it here</strong>
       <p>The folder with the .cpr or .rpp and its audio. You get the converted project back as a zip, with every file it uses.</p>
       <div class="row">
-        <button id="pickFolder">Choose folder…</button>
-        <button id="pickZip">Choose .zip…</button>
+        <button id="pickFolder" type="button">Choose folder…</button>
+        <button id="pickZip" type="button">Choose .zip…</button>
       </div>
       <input id="folderInput" type="file" webkitdirectory directory multiple hidden>
       <input id="zipInput" type="file" accept=".zip" hidden>
     </div>
 
-    <div id="step2">
-      <label for="project">Project to convert</label>
-      <select id="project"></select>
-      <div class="row"><button class="primary" id="go">Convert</button></div>
-    </div>
+    <div class="card-body">
+      <div id="step2">
+        <label for="project">Project to convert</label>
+        <div class="pick">
+          <div class="select"><select id="project"></select></div>
+          <button class="primary" id="go" type="button">Convert <span class="go-arrow" aria-hidden="true">→</span></button>
+        </div>
+      </div>
 
-    <p id="status">Starting…</p>
-    <pre id="log"></pre>
-    <div id="result"></div>
-  </div>
+      <p id="status" role="status" aria-live="polite">Starting…</p>
+      <pre id="log" tabindex="0" aria-label="Conversion log"></pre>
+      <div id="result"></div>
+    </div>
+  </main>
 
   <h2>Good to know</h2>
-  <ul>
-    <li>Cubase → REAPER and REAPER → Cubase: tracks, audio, MIDI, fades, automation, stretch, pitch, reverse,
+  <ul class="facts">
+    <li><b>Native, not printed</b>Cubase → REAPER and REAPER → Cubase: tracks, audio, MIDI, fades, automation, stretch, pitch, reverse,
         warp markers and Melodyne edits come across natively; nothing is printed to audio.</li>
-    <li>Each DAW's built-in effects become the other's closest built-in effects. EQ, volume, pan and width match;
+    <li><b>Built-in effects</b>Each DAW's built-in effects become the other's closest built-in effects. EQ, volume, pan and width match;
         compressors, limiters, reverbs and the like are close, not identical.</li>
-    <li>Third-party plug-ins keep their settings; they must be installed where you open the converted project.</li>
-    <li>The first visit downloads about 50 MB (Python and ffmpeg for the browser); after that they are cached.
+    <li><b>Third-party plug-ins</b>Third-party plug-ins keep their settings; they must be installed where you open the converted project.</li>
+    <li><b>First visit</b>The first visit downloads about 50 MB (Python and ffmpeg for the browser); after that they are cached.
         Large projects need a computer with enough memory (roughly three times the project's size).</li>
   </ul>
   <footer>Uses <a href="https://pyodide.org">Pyodide</a> and <a href="https://ffmpegwasm.netlify.app">ffmpeg.wasm</a> (ffmpeg is GPL/LGPL).</footer>
-</main>
+</div>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -102,7 +256,9 @@ const SKIP_EXT = ['.peak', '.reapeaks', '.csh', '.ds_store'];
 let ready = false, busy = false, url = null, pending = null;
 const WAIT = 'The converter is still loading — your project will be read as soon as it is ready.';
 
-function setStatus(text, cls) { statusEl.textContent = text; statusEl.className = cls || ''; }
+// visual only: a spinner while the converter loads or converts
+function setStatus(text, cls) { statusEl.textContent = text; statusEl.className = cls || '';
+  if (!cls && (!ready || busy)) statusEl.classList.add('working'); }
 
 // the log redraws progress bars the way a terminal does (\r)
 let logText = '';
@@ -116,7 +272,7 @@ function addLog(t) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-const worker = new Worker('worker.js?v=68c308cc70');
+const worker = new Worker('worker.js?v=da386932ed');
 worker.onmessage = (e) => {
   const m = e.data;
   if (m.type === 'status') setStatus(m.text);
@@ -186,6 +342,12 @@ function done(m) {
   const blob = new Blob([m.zip], { type: 'application/zip' });
   url = URL.createObjectURL(blob);
   resultEl.innerHTML = '';
+  const head = document.createElement('p');   // visual only
+  head.className = 'result-head';
+  head.innerHTML = '<span aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" ' +
+    'stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 10 17 19 7"/></svg></span>' +
+    'Your converted project is ready';
+  resultEl.appendChild(head);
   const a = document.createElement('a'); a.href = url; a.download = m.name; a.className = 'btn primary';
   a.textContent = `Download ${m.name} (${(blob.size / 1e6).toFixed(1)} MB)`;
   resultEl.appendChild(a); resultEl.style.display = 'block';
