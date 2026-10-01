@@ -44,6 +44,8 @@
             border-radius: 8px; padding: 12px; max-height: 340px; overflow: auto; font-size: 12.5px;
             line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
   #result { margin-top: 16px; display: none; text-align: center; }
+  #result .hint { margin: 14px 0 0; color: var(--muted); font-size: 14px; }
+  #result .warn { margin: 10px 0 0; color: var(--bad); font-size: 14px; }
   h2 { font-size: 17px; margin: 28px 0 8px; }
   ul { margin: 0; padding-left: 20px; color: var(--muted); }
   li { margin: 4px 0; }
@@ -113,7 +115,7 @@ function addLog(t) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-const worker = new Worker('worker.js?v=6fe229a363');
+const worker = new Worker('worker.js?v=f29878b4f9');
 worker.onmessage = (e) => {
   const m = e.data;
   if (m.type === 'status') setStatus(m.text);
@@ -184,6 +186,20 @@ function done(m) {
   const a = document.createElement('a'); a.href = url; a.download = m.name; a.className = 'btn primary';
   a.textContent = `Download ${m.name} (${(blob.size / 1e6).toFixed(1)} MB)`;
   resultEl.appendChild(a); resultEl.style.display = 'block';
+  const hint = document.createElement('p');
+  hint.className = 'hint';
+  hint.innerHTML = '<strong>Unzip the download first</strong> (right-click → Extract All), then open the project ' +
+    'inside the unzipped folder. Opened straight from the zip, Cubase or REAPER gets the project file without its audio.';
+  resultEl.appendChild(hint);
+  // audio the project names that was not among the files given
+  const m2 = logText.match(/(\d+) file\(s\) are not on this machine at all/);
+  if (m2) {
+    const w = document.createElement('p');
+    w.className = 'warn';
+    w.textContent = `${m2[1]} audio file(s) the project uses were not in what you dropped, so they are missing ` +
+      'in the conversion. Drop the whole project folder (or a zip of it), not just the project file.';
+    resultEl.appendChild(w);
+  }
   setStatus(m.checked ? 'Converted, and the check found no differences.' :
             'Converted. The check above lists what differs.', m.checked ? 'ok' : '');
   a.click();
@@ -202,6 +218,10 @@ drop.addEventListener('drop', async (e) => {
   const items = [...e.dataTransfer.items].map((i) => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
   if (items.length === 1 && items[0].isFile && /\.zip$/i.test(items[0].name)) {
     items[0].file((f) => sendZip(f)); return;
+  }
+  if (items.length && items.every((it) => it.isFile) && items.some((it) => /\.(rpp|cpr|bak)$/i.test(it.name))) {
+    setStatus('That is only the project file — drop the whole project folder (or a zip of it), so its audio comes along.', 'bad');
+    return;
   }
   const out = [];
   async function walk(entry, prefix) {
