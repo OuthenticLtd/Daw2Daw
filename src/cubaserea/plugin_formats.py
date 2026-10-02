@@ -410,6 +410,13 @@ def for_cubase(project, log):
     for fx in chains(project):
         if getattr(fx, 'native', False) or (getattr(fx, 'format', '') or '') != 'VST':
             continue
+        # one of REAPER's own already made one of Cubase's (stock.py,
+        # natives.py): its format is still REAPER's 'VST', and RoomWorks'
+        # class id reads as a VST2 one ('VSTReVA...') - wrapped, it carried
+        # ReaVerbate's values as RoomWorks' parameters
+        if (getattr(fx, 'reaper_stock', None) or getattr(fx, 'reaper_js', None)
+                or getattr(fx, 'cubase_only', False)):
+            continue
         four = four_of(fx)
         if not four:
             continue

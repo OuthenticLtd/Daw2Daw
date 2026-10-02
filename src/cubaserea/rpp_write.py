@@ -240,6 +240,47 @@ MASTER = ('PLAYRATE 1 0 0.25 4', 'SELECTION 0 0', 'SELECTION2 0 0',
           'MASTER_PANMODE 3', 'MASTER_FX 1', 'MASTER_SEL 0')
 
 
+def _js_volume_at(chain, k):
+    """(dB slider, end index) when chain[k:] is a plain, switched-on JS
+    volume block (BYPASS, the block, FLOATPOS, FXID, WAK), else None."""
+    import re
+    if k + 6 >= len(chain) or chain[k].strip() != 'BYPASS 0 0 0':
+        return None
+    if chain[k + 1].strip() != '<JS utility/volume ""':
+        return None
+    m = re.match(r'^\s*(-?[0-9.]+) 150( -)+\s*$', chain[k + 2])
+    if not m or chain[k + 3].strip() != '>':
+        return None
+    j = k + 4
+    while j < len(chain) and chain[j].strip().split(' ')[0] in ('FLOATPOS', 'FXID', 'WAK', 'PRESETNAME'):
+        j += 1
+    return float(m.group(1)), j
+
+
+def merge_js_volumes(chain):
+    """REAPER volume effects one after another (a mapping's level step next
+    to a level of its own, a round trip's Volumes): one, the gains summed
+    (the slider is 6 log2 of the gain, so they add), up to its +24 dB."""
+    out, k = [], 0
+    while k < len(chain):
+        a = _js_volume_at(chain, k)
+        if a is None:
+            out.append(chain[k])
+            k += 1
+            continue
+        total, end, first = a[0], a[1], (k, a[1])
+        b = _js_volume_at(chain, end)
+        while b is not None and -150 < total + b[0] <= 24:
+            total += b[0]
+            end = b[1]
+            b = _js_volume_at(chain, end)
+        blk = chain[first[0]:first[1]]
+        blk[2] = blk[2].replace(blk[2].strip().split(' ')[0], '%.9g' % total, 1)
+        out.extend(blk)
+        k = end
+    return out
+
+
 def write(proj, path, media_root=None, plugin_index=None, log=None):
     log = log if log is not None else []
     idx = plugin_index if plugin_index is not None else P.PluginIndex()
@@ -400,7 +441,7 @@ def write(proj, path, media_root=None, plugin_index=None, log=None):
                                          fxid=guid_from('chan_eq', i, t.name)))
             stats['chan_eq'] = stats.get('chan_eq', 0) + 1
             eq_worst[0] = max(eq_worst[0], err)
-        return chain
+        return merge_js_volumes(chain)
 
     # sends live on the destination track in an RPP
     incoming = {}

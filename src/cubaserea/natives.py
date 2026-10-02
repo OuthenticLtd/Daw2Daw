@@ -90,10 +90,14 @@ JS_EXPANDER = 'sstillwell/expander'      # threshold dB, ratio, gain dB, detecto
                                          # detection (2 peak, 3 RMS), attack, release ms
 
 
-def js_expander(threshold_db, ratio, gain_db=0.0, rms=False, attack_ms=30.0, release_ms=2.0):
+def js_expander(threshold_db, ratio, gain_db=0.0, rms=False, attack_ms=30.0, release_ms=2.0, knee=False):
+    # an eighth value past the JS's seven sliders (REAPER keeps and ignores
+    # it) carries a soft knee across, for Cubase's Expander and Live's
+    # Multiband Dynamics, which have one
     return ('js', JS_EXPANDER, [max(-120.0, min(0.0, threshold_db)), max(1.0, min(20.0, ratio)),
                                 max(-20.0, min(20.0, gain_db)), 0.0, 3.0 if rms else 2.0,
-                                max(0.0, min(200.0, attack_ms)), max(0.0, min(100.0, release_ms))])
+                                max(0.0, min(200.0, attack_ms)), max(0.0, min(100.0, release_ms))]
+            + ([1.0] if knee else []))
 
 
 def _comp(threshold_db, ratio, attack_ms, release_ms, makeup_db=0.0, knee_db=0.0, mix=1.0,
@@ -121,7 +125,7 @@ def _limit(threshold_db, ceiling_db):
 def c_expander(r, p):
     g = _g(r)
     return [js_expander(g('threshold', -20.0), g('ratio', 2.0), 0.0, g('rms') > 50.0,
-                        g('attack', 5.0), min(100.0, g('release', 150.0)))], \
+                        g('attack', 5.0), min(100.0, g('release', 150.0)), g('softknee') > 0.5)], \
         'close (REAPER Downward Expander)'
 
 
@@ -402,7 +406,8 @@ def r_expander(sl, tempo):
     v = list(sl) + [0.0] * 7
     return 'Expander', {'threshold': v[0], 'ratio': max(1.0, v[1]), 'attack': v[5],
                         'release': max(1.0, v[6]), 'rms': 80.0 if int(v[4]) & 1 else 0.0,
-                        'softknee': 0.0, 'bypass': 0.0}, 'close (Cubase Expander)'
+                        'softknee': 1.0 if len(sl) > 7 and v[7] > 0.5 else 0.0,
+                        'bypass': 0.0}, 'close (Cubase Expander)'
 
 
 def r_reaxcomp(data, tempo):

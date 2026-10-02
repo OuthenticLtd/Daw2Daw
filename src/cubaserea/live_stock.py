@@ -902,6 +902,8 @@ def expander_js(w, sliders):
     if v[1] > 4.0:
         w.log.append("an expansion ratio of %.1f is past Live Multiband Dynamics' 1:4 and is set "
                      "to that" % v[1])
+    if len(sliders) > 7 and sliders[7] > 0.5:
+        band['knee_db'] = 6.0
     got = multiband(w, natives.reaxcomp([dict(band, top_hz=120.0), dict(band, top_hz=2500.0), band]))
     if got:
         return got[0], 'approximate (Live Multiband Dynamics, below its threshold, level matched)'
@@ -966,7 +968,8 @@ def rev_multiband(d, tempo):
         b = bands[0]
         return [('js', natives.JS_EXPANDER, [b['threshold_db'] - EXPANDER_THR_OFFSET, 1.0 / b['ratio'],
                                              b['gain_db'], 0.0,
-                                             3.0 if b['rms_ms'] > 0 else 2.0, b['attack_ms'], b['release_ms']])], \
+                                             3.0 if b['rms_ms'] > 0 else 2.0, b['attack_ms'], b['release_ms']]
+                 + ([1.0] if b['knee_db'] > 1.0 else []))], \
             'close (REAPER Downward Expander)'
     joined = [bands[0]]
     for b in bands[1:]:

@@ -483,12 +483,25 @@ def finish_fx(t, p, log):
                 log.append("%r: ReaEQ -> Cubase's Frequency (%d band(s)), within %.2f dB of "
                            "ReaEQ's curve%s" % (t.name, len(rb), worst,
                                                 '' if worst <= 0.5 else ' - check it by ear'))
-    for fx in t.fx:
+    for fx in list(t.fx):
         if fx.native and (fx.name or '') in ('ReaComp', 'ReaDelay', 'ReaLimit', 'ReaGate', 'ReaVerbate', 'ReaPitch'):
             data = getattr(fx, 'raw_state', None) or fx.component
             got = stock.to_cubase(fx.name, data, tempo=(p.tempo[0][1] if p.tempo else 120.0))
             if got:
-                uid, st, cname, how = got
+                uid, st, cname, how = got[:4]
+                # Cubase effects around it (a level after, a filter
+                # before); REAPER and Live keep the original
+                from . import builtins
+                k = t.fx.index(fx)
+                for pos, extra in ((k + 1, got[4] if len(got) > 4 else ()),
+                                   (k, got[5] if len(got) > 5 else ())):
+                    for uid2, st2, name2 in reversed(list(extra)):
+                        f2 = Fx()
+                        f2.uid, f2.component, f2.name = uid2, st2, name2
+                        f2.controller = builtins._template(name2)[1] or b''
+                        f2.bypass, f2.offline = fx.bypass, fx.offline
+                        f2.cubase_only = True
+                        t.fx.insert(pos, f2)
                 # the REAPER original, for a writer whose own stock
                 # effects map from it rather than from Cubase's
                 # (als_write -> live_stock)

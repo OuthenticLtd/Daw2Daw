@@ -198,6 +198,38 @@ _VB_RT = [0.21, 0.24, 0.27, 0.32, 0.38, 0.46, 0.58, 0.78, 1.15, 2.10, 9.72]
 _VB_EN = [-2.1, -1.9, -1.7, -1.4, -1.0, -0.6, 0.0, 0.7, 1.6, 3.0, 6.4]
 
 
+# Level on steady noise (2026-10-02, the same noise through both, wet
+# only, dB under the input): ReaVerbate at wet 0 dB by room size in tenths
+# at dampening 0.3 and 0.65, and RoomWorks at Mix 1 by Time. RoomWorks
+# hardly changes with Time and is 5..10 dB under ReaVerbate; ReaVerbate
+# grows with the room.
+_VB_NOISE = {0.3: [-4.2, -4.1, -3.9, -3.6, -3.2, -2.8, -2.3, -1.7, -0.8, 0.6, 3.4],
+             0.65: [-4.3, -4.2, -4.0, -3.8, -3.6, -3.3, -2.9, -2.4, -1.8, -0.8, 1.6]}
+_RW_T = [0.0, 0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+_RW_NOISE = [-9.18, -9.70, -10.20, -10.41, -10.60, -10.78, -10.99, -11.31, -11.82]
+
+
+def _lerp(xs, ys, x):
+    x = max(xs[0], min(xs[-1], x))
+    for i in range(len(xs) - 1):
+        if x <= xs[i + 1]:
+            f = (x - xs[i]) / (xs[i + 1] - xs[i])
+            return ys[i] + f * (ys[i + 1] - ys[i])
+    return ys[-1]
+
+
+def verbate_noise_db(room, damping=0.3):
+    """ReaVerbate's wet level on noise at wet 0 dB (dB)."""
+    rooms = [k / 10.0 for k in range(11)]
+    lo, hi = _lerp(rooms, _VB_NOISE[0.3], room), _lerp(rooms, _VB_NOISE[0.65], room)
+    return lo + (hi - lo) * max(0.0, min(1.0, (damping - 0.3) / 0.35))
+
+
+def roomworks_noise_db(time):
+    """RoomWorks' wet level on noise at Mix 1 (dB)."""
+    return _lerp(_RW_T, _RW_NOISE, time)
+
+
 def verbate_for(rt60, level_db, predelay_ms, mix=1.0, dry_db=None, **kw):
     """ReaVerbate with the RT60 and tail level (dB, energy of an impulse's
     answer) of a Cubase reverb: the room size that gives that RT60, the wet
@@ -494,11 +526,24 @@ def from_cubase(fx, project=None):
     if uid in (ROOMWORKS_UID, ROOMWORKS_SE_UID):
         # measured on the user's RoomWorks (Cubase export of an impulse):
         # Time 0.58 -> RT60 1.79 s (0.2 s x 50^time), Pre-Delay 0.36 -> 65 ms
-        # (180 ms full scale), the tail 9.3 dB under ReaVerbate's
-        mix = g('mix', 0.5)
-        return [('vst', 'ReaVerbate', verbate_for(
-            0.2 * 50.0 ** g('time', 0.5), 20 * math.log10(max(mix, 1e-6)) - 9.3, 180.0 * g('preDelay', 0.0),
-            dry_db=20 * math.log10(1 - mix) if mix < 1 else None,
+        # (180 ms full scale); the wet level on noise from both measured
+        # (roomworks_noise_db, verbate_noise_db)
+        mix, time = g('mix', 0.5), g('time', 0.5)
+        lr = math.log(max(0.21, min(9.72, 0.2 * 50.0 ** time)))
+        room = 1.0
+        for i in range(10):
+            a, b = math.log(_VB_RT[i]), math.log(_VB_RT[i + 1])
+            if lr <= b:
+                room = (i + max(0.0, (lr - a) / (b - a))) / 10.0
+                break
+        # its Mix (measured): wet sqrt(mix), dry sqrt(1 - mix); with Send
+        # on it plays all wet whatever the Mix
+        wet, dry = (1.0, 0.0) if g('send', 0.0) >= 0.5 else (math.sqrt(mix), math.sqrt(1 - mix))
+        wet_db = (20 * math.log10(max(wet, 1e-6)) + roomworks_noise_db(time)
+                  - verbate_noise_db(room, 0.3))
+        return [('vst', 'ReaVerbate', reaverbate(
+            wet_db=wet_db, dry_db=20 * math.log10(dry) if dry > 1e-6 else None,
+            room=room, damping=0.3, delay_ms=max(0.0, 180.0 * g('preDelay', 0.0) - 25.0),
             width=max(-1.0, min(1.0, g('width', 1.0)))))], 'approximate (ReaVerbate)'
     if fx.name == 'EnvelopeShaper':
         clamp = lambda v, a, b: max(a, min(b, v))
@@ -641,16 +686,51 @@ def to_cubase(name, data, tempo=120.0):
         k = max(0, min(9, int(room * 10)))
         f = room * 10 - k
         rt = math.exp(math.log(_VB_RT[k]) + f * (math.log(_VB_RT[k + 1]) - math.log(_VB_RT[k])))
-        en = _VB_EN[k] + f * (_VB_EN[k + 1] - _VB_EN[k])
-        # RoomWorks: tail 9.3 dB under ReaVerbate's at the same gain; its
-        # Mix crossfades
-        tail = 10 ** ((_db(wet) + en + 9.3) / 20.0)
-        mix = max(0.0, min(1.0, tail / max(tail + dry, 1e-9)))
-        rec = {'mix': mix, 'time': max(0.0, min(1.0, math.log(max(rt, 0.2) / 0.2) / math.log(50.0))),
+        time = max(0.0, min(1.0, math.log(max(rt, 0.2) / 0.2) / math.log(50.0)))
+        # RoomWorks' Mix (measured): wet sqrt(mix), dry sqrt(1 - mix); Send
+        # on plays it all wet. The wet it needs for ReaVerbate's level
+        # (measured on noise), the overall level a Volume after it - at
+        # Mix 1 RoomWorks is 5..10 dB under ReaVerbate
+        tail = wet * 10 ** ((verbate_noise_db(room, v[3]) - roomworks_noise_db(time)) / 20.0)
+        if dry <= 1e-6:
+            level, mix, send = tail, 1.0, 1.0
+        else:
+            level = math.sqrt(tail * tail + dry * dry)
+            mix, send = max(0.0, min(1.0, tail * tail / max(level * level, 1e-18))), 0.0
+        rec = {'mix': mix, 'time': time, 'send': send,
                'preDelay': max(0.0, min(1.0, (500.0 * v[5] + 25.0) / 180.0)),
                'width': max(0.0, min(1.0, 2 * v[4] - 1)), 'bypass': 0.0}
         st = builtins.table_state('RoomWorks', rec)
-        return (ROOMWORKS_UID, st, 'RoomWorks', 'approximate (Cubase RoomWorks)') if st else None
+        if not st:
+            return None
+        how = 'approximate (Cubase RoomWorks)'
+        # ReaVerbate's high and low pass (12 dB/oct, Q about 1, measured)
+        # filter what goes into the reverb: a Frequency before RoomWorks,
+        # when there is no dry signal for it to filter too (Black Seven's
+        # Reverb Long cut at 800 Hz: without it the bass bus' sends made
+        # the return 11.7 dB loud)
+        before = []
+        hp, lp = 20000.0 * v[7], 20000.0 * v[6]
+        bands = []
+        if hp > 20.5:
+            bands.append((4, 1, hp, 1.0, 1.388))
+        if lp < 19990.0:
+            bands.append((3, 1, lp, 1.0, 1.388))
+        if bands and dry <= 1e-6:
+            from . import freq_eq
+            recs, _worst = freq_eq.records_for(bands)
+            fst = builtins.table_state('Frequency', recs[0]) if recs else None
+            if fst:
+                before.append((freq_eq.UID, fst, 'Frequency'))
+                how += ', its %s before it on a Frequency' % ' and '.join(
+                    ('high pass %.0f Hz' if bd[0] == 4 else 'low pass %.0f Hz') % bd[2] for bd in bands)
+        elif bands:
+            how += ' - ReaVerbate filters its reverb, RoomWorks does not: check it by ear'
+        after = []
+        if level > 1e-9 and abs(_db(level)) > 0.01:
+            after = [(builtins.VOLUME_UID, builtins.volume_state(part), 'Volume')
+                     for part in builtins.volume_split(level)]
+        return ROOMWORKS_UID, st, 'RoomWorks', how, after, before
     if name == 'ReaPitch' and data and len(data) >= 32:
         n, size = struct.unpack_from('<II', data, 8)
         dry = _f32(data, 28)

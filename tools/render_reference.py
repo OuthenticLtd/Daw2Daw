@@ -145,7 +145,7 @@ def render(rpp, out_dir, stems):
     print('  rendering %s of %s ...' % ('stems' if stems else 'master',
                                         os.path.basename(rpp)), flush=True)
     try:
-        subprocess.run([reaper, '-nosplash', '-renderproject', beside],
+        subprocess.run([reaper, '-newinst', '-nosplash', '-renderproject', beside],
                        timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
         print('  REAPER timed out after %.0f s' % TIMEOUT, flush=True)

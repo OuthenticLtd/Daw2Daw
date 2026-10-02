@@ -378,3 +378,43 @@ def cubase_equivalent(js_path, sliders):
 
 
 ENVELOPE_SHAPER_UID = 'C3D60417A5BB4FB288CB1A75FA641EDF'
+
+
+def merge_volumes(fxs):
+    """Cubase Volume inserts next to each other, all switched on, no lane
+    on any, each the same on both channels: one gain, in as few Volumes as
+    that needs (volume_split; a round trip through REAPER or Live stacked
+    them). Returns (new list, how many went)."""
+    out, gone = [], 0
+    run = []
+
+    def flush():
+        nonlocal gone
+        if len(run) < 2:
+            out.extend(run)
+        else:
+            g = 1.0
+            for f in run:
+                gain, g0, g1, _b = volume_params(f.component)
+                g *= gain * g0
+            parts = volume_split(g)
+            for k, part in enumerate(parts):
+                f = run[k]
+                f.component = volume_state(part)
+                out.append(f)
+            gone += len(run) - len(parts)
+        run.clear()
+
+    for f in fxs:
+        ok = ((f.uid or '').upper() == VOLUME_UID and not f.bypass and not f.offline
+              and not getattr(f, 'envelopes', None) and not getattr(f, 'fader_overflow', False))
+        if ok:
+            gain, g0, g1, byp = volume_params(f.component)
+            ok = abs(g0 - g1) < 1e-9 and byp < 0.5
+        if ok:
+            run.append(f)
+        else:
+            flush()
+            out.append(f)
+    flush()
+    return out, gone

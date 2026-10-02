@@ -3150,6 +3150,14 @@ def write(new, path, donor=None, log=None):
     from .model import split_video_audio
     split_video_audio(new, path, log)
     expand_for_cubase(new, log)
+    from . import builtins as _bm
+    _gone = 0
+    for _t in new.tracks + ([new.master] if getattr(new, 'master', None) else []):
+        _t.fx, _n = _bm.merge_volumes(list(_t.fx))
+        _gone += _n
+    if _gone:
+        log.append('%d Volume insert(s) next to another were merged into it - one gain, the same level'
+                   % _gone)
     mute_tracks_by_events(new, log)
     idle_lanes_for_cubase(new, log)
     curves_for_cubase(new)
