@@ -457,7 +457,7 @@ function addLog(t) {
   UI.fromLog(logText);
 }
 
-const worker = new Worker('worker.js?v=a51a0e7692');
+const worker = new Worker('worker.js?v=8719e1cd96');
 worker.onmessage = (e) => {
   const m = e.data;
   if (m.type === 'status') setStatus(m.text);

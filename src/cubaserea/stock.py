@@ -303,6 +303,18 @@ def from_cubase(fx, project=None):
     rate = float(getattr(project, 'samplerate', 48000) or 48000) if project is not None else 48000.0
     if project is not None and getattr(project, 'tempo', None):
         tempo = project.tempo[0][1]
+    from . import freq_eq
+    if uid == freq_eq.UID:
+        # Frequency: a ReaEQ band for each of its bands (freq_eq, measured)
+        notes = []
+        rb, worst = freq_eq.reaeq_of(r, notes)
+        if not rb:
+            return None
+        from . import chan_eq
+        out = [('vst', 'ReaEQ', chan_eq.reaeq_data(rb))]
+        if abs(g('equalizerAoutput')) > 1e-6:
+            out.append(('js', 'utility/volume', [js_db(db2lin(g('equalizerAoutput'))), 150.0]))
+        return out, 'close (ReaEQ, within %.1f dB of Frequency)' % worst
     if uid == builtins.STEREO_ENHANCER_UID:
         exact = g('delayon') < 0.5 and g('colouron') < 0.5
         return [stereo_width(g('width', 100.0), g('monoout') > 0.5)], \

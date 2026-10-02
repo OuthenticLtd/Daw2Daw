@@ -976,7 +976,7 @@ class Writer:
             self.stats['stateless'] = self.stats.get('stateless', []) + [f.name]
         return d
 
-    CUBASE_STOCK = ('Chorus', 'WahWah', 'Compressor', 'StereoDelay', 'Limiter',
+    CUBASE_STOCK = ('Chorus', 'WahWah', 'Compressor', 'StereoDelay', 'Limiter', 'Frequency',
                     'Brickwall Limiter', 'Gate', 'RoomWorks', 'Octaver', 'Volume',
                     'StereoEnhancer', 'MonoToStereo', 'EnvelopeShaper', 'REVerence')
 
@@ -1178,6 +1178,8 @@ class Writer:
         n_inst = sum(1 for _f, i in chain if i)
 
         def place(target, f, inst):
+            if getattr(f, 'cubase_only', False):
+                return
             native = self.stock_for(f)
             if native is not None:
                 for dev, how in native:

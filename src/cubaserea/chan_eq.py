@@ -409,7 +409,9 @@ def reaeq_band_db(band, freqs, rate=48000.0):
         b, a = _shelf(fr, gdb, Q, Q, ty == 1, rate)
         return _biquad_db(b, a, freqs, rate)
     if ty in (3, 4):
-        Q = 1.0 / (2 * math.sinh(math.log(2) / 2 * bw))
+        # its passes take the bandwidth the way its bands do, warped by
+        # w / sin w (a 6 kHz low pass at bw 1 renders at Q 1.27, not 1.41)
+        Q = 1.0 / (2 * math.sinh(math.log(2) / 2 * bw * w / math.sin(w)))
         b, a = _pass(fr, Q, ty == 3, rate)
         return _biquad_db(b, a, freqs, rate)
     return None

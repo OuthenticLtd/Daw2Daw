@@ -294,6 +294,8 @@ def write(proj, path, media_root=None, plugin_index=None, log=None):
         allfx = ([t.instrument] if t.instrument else []) + list(t.fx)
         from . import stock, builtins
         for k, fx in enumerate(allfx):
+            if getattr(fx, 'cubase_only', False):
+                continue
             if getattr(fx, 'rpp_lines', None):
                 # REAPER's own plug-in a Live device became (als_read): its
                 # block as made, at this chain's indent

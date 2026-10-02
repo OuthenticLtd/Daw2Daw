@@ -351,7 +351,14 @@ def eq8(w, bands):
     return d, 'close (Live EQ Eight, band for band)'
 
 
-REAPER_MAP = {'ReaComp': compressor, 'ReaLimit': limiter, 'ReaGate': gate,
+def reaeq(w, data):
+    """ReaEQ -> EQ Eight, band for band (eq8)."""
+    from . import chan_eq
+    rb = chan_eq.reaeq_state_bands(data)
+    return eq8(w, rb) if rb else None
+
+
+REAPER_MAP = {'ReaComp': compressor, 'ReaLimit': limiter, 'ReaGate': gate, 'ReaEQ': reaeq,
               'ReaDelay': delay, 'ReaVerbate': reverb}
 
 

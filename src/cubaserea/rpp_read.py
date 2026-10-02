@@ -424,6 +424,16 @@ def finish_fx(t, p, log):
                         best = (w, b2)
                 if best is not None:
                     worst, bands = best
+            if bands is not None and any(x[0] == 3 for x in rb):
+                # the channel EQ has no low pass (only shelves standing in for
+                # one, 0.6 dB off on a Cubase export); Frequency has the real one
+                bands = None
+            if bands is not None and worst > 0.5:
+                # Frequency (an insert, eight bands) plays it closer than the
+                # channel EQ's four: left for that (below)
+                from . import freq_eq
+                if freq_eq.records_for(rb)[1] < worst:
+                    bands = None
             if bands is not None:
                 t.chan_eq = [] if t.fx[-1].bypass else bands
                 # ReaEQ's own bands, for a writer with an EQ that
@@ -439,6 +449,40 @@ def finish_fx(t, p, log):
     # REAPER's own plug-ins with a Cubase counterpart become that
     # one of Cubase's own effects, with the same settings (stock.py)
     from . import stock
+    eqs = []
+    for fx in list(t.fx):
+        if fx.native and (fx.name or '').startswith('ReaEQ') and not fx.offline:
+            # a ReaEQ anywhere else in the chain: Cubase's Frequency, a
+            # band for each (more than eight: a second one after it)
+            from . import chan_eq, freq_eq, builtins
+            data = getattr(fx, 'raw_state', None) or fx.component
+            rb = chan_eq.reaeq_state_bands(data)
+            if rb is None:
+                continue
+            recs, worst = freq_eq.records_for(rb, log)
+            new = []
+            for rec in recs:
+                st = builtins.table_state('Frequency', rec)
+                if st is None:
+                    new = []
+                    break
+                f2 = Fx()
+                f2.uid, f2.component, f2.name = freq_eq.UID, st, 'Frequency'
+                f2.controller = builtins._template('Frequency')[1]
+                f2.bypass, f2.offline, f2.chain_pos = fx.bypass, fx.offline, fx.chain_pos
+                f2.reaper_stock = ('ReaEQ', data)
+                # a second Frequency only holds the bands past eight: the
+                # one ReaEQ (or EQ Eight) elsewhere has them all
+                f2.cubase_only = bool(new)
+                if getattr(fx, 'rpp_lines', None) and not new:
+                    f2.rpp_lines = fx.rpp_lines
+                new.append(f2)
+            if new:
+                k = t.fx.index(fx)
+                t.fx[k:k + 1] = new
+                log.append("%r: ReaEQ -> Cubase's Frequency (%d band(s)), within %.2f dB of "
+                           "ReaEQ's curve%s" % (t.name, len(rb), worst,
+                                                '' if worst <= 0.5 else ' - check it by ear'))
     for fx in t.fx:
         if fx.native and (fx.name or '') in ('ReaComp', 'ReaDelay', 'ReaLimit', 'ReaGate', 'ReaVerbate', 'ReaPitch'):
             data = getattr(fx, 'raw_state', None) or fx.component

@@ -124,6 +124,8 @@ def without_missing_media(rpp):
 
 
 def render(rpp, out_dir, stems):
+    # REAPER reads a relative RENDER_FILE against the project's folder
+    out_dir = os.path.abspath(out_dir)
     reaper = media.find_reaper_exe()
     if not reaper:
         raise SystemExit('reaper.exe not found')
