@@ -1868,6 +1868,15 @@ class CprReader:
             src = length / PPQ * (60.0 / clip_bpm)       # seconds of the file
             it.soffs = offset / PPQ * (60.0 / clip_bpm)
             it.playrate = (src / it.length) if it.length > 0 else 1.0
+            # elastique Pro - Tape (tapeStyleMode 1): the pitch follows the
+            # speed, REAPER's Preserve Pitch off. Its place was found and
+            # the value never read, so a tape stretch came back pitch-kept
+            to = info.get('tape_off')
+            if to is not None:
+                try:
+                    it.preserve_pitch = struct.unpack_from('>q', A.d, to - A.base)[0] == 0
+                except struct.error:
+                    pass
             sm = self.warp_markers(info.get('warp_pts'), rate, start, length,
                                    offset, it.pos)
             if sm:

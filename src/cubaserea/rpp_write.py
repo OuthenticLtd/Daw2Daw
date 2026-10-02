@@ -788,9 +788,13 @@ def write(proj, path, media_root=None, plugin_index=None, log=None):
                 # second field is preserve-pitch: a Cubase musical-mode clip
                 # is pitch-preserved, so a stretched item keeps its key; the
                 # third is the pitch shift in semitones (a Cubase event's
-                # Transpose + Fine-tune, cpr_read's 'FtiP' record)
-                A('      PLAYRATE %s 1 %s -1 0 0.0025'
-                  % (fmt(it.playrate or 1.0), fmt(getattr(it, 'pitch', 0.0) or 0.0)))
+                # Transpose + Fine-tune, cpr_read's 'FtiP' record). A tape
+                # stretch (Live's Repitch, the item's preserve_pitch off)
+                # plays its pitch with its speed - always 1, a slowed clip
+                # from Live came back at its old pitch
+                A('      PLAYRATE %s %d %s -1 0 0.0025'
+                  % (fmt(it.playrate or 1.0), 0 if getattr(it, 'preserve_pitch', True) is False else 1,
+                     fmt(getattr(it, 'pitch', 0.0) or 0.0)))
                 if getattr(it, 'stretch_markers', None):
                     # (position in take time, source second) pairs
                     A('      SM %s' % ' + '.join('%s %s' % (fmt(p), fmt(q))

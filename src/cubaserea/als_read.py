@@ -90,7 +90,11 @@ class TempoMap:
     straight lines between them, a jump where two share a beat."""
 
     def __init__(self, bpm0, events):
-        pts = sorted((max(0.0, t), v) for t, v in events if t > START / 2)
+        # by beat only, Live's own order kept within one: a jump is two
+        # points on one beat, and sorting on the value as well turned a step
+        # down (120 then 90 at beat 12) into a ramp from the song's start
+        pts = sorted(((max(0.0, t), v) for t, v in events if t > START / 2),
+                     key=lambda e: e[0])
         self.pts = [(0.0, pts[0][1] if pts and pts[0][0] <= 1e-9 else bpm0)] + pts
         if not self.pts[1:]:
             self.pts = [(0.0, bpm0)]
