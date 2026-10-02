@@ -112,7 +112,7 @@ def _script(path, argv):
         sys.argv = old
 
 
-def convert(src, out):
+def convert(src, out, plugin_format='source'):
     """Convert `src` (a project file in the browser's file system) to `out`,
     collecting every file it uses beside it, then check the result against
     the original. Returns (exit code of the conversion, of the check)."""
@@ -128,7 +128,8 @@ def convert(src, out):
             # the clean build CONVERT.bat makes (drop.py)
             env = {'CPR_ON_CONSUME': '1', 'CPR_ON_DELPROTO': '1'}
         os.environ.update(env)
-        rc = _script(os.path.join(TOOL, 'convert.py'), [src, out, '--collect'])
+        rc = _script(os.path.join(TOOL, 'convert.py'),
+                     [src, out, '--collect', '--plugin-format', plugin_format or 'source'])
         for k in env:
             os.environ.pop(k, None)
         rc2 = None

@@ -349,7 +349,8 @@ def write(proj, path, media_root=None, plugin_index=None, log=None):
             stats['fx'] += 1
             comp = fx.component if usable else b''
             ctrl = fx.controller if usable else b''
-            if comp:
+            if comp or (usable and not entry['vst3'] and (getattr(fx, 'raw_state', None)
+                                                       or getattr(fx, 'param_dump', False))):
                 stats['fx_state'] += 1
             else:
                 log.append('%s on %r added without its saved settings'
@@ -358,9 +359,15 @@ def write(proj, path, media_root=None, plugin_index=None, log=None):
                          % (indent, 1 if fx.bypass else 0,
                             1 if (fx.offline or getattr(t, 'disabled', False)) else 0))
             ident = fx.uid if (fx.uid and not entry['uid']) else None
+            raw = None
+            if not entry['vst3'] and usable:
+                # a VST2 build: its own chunk or REAPER's parameter dump, not
+                # the VST3 pair (a Cubase VST2 is the wrapper's 'VstW' bank)
+                from . import plugin_formats
+                raw = plugin_formats.reaper_vst2_state(fx) or None
             chain.extend(P.vst_block(entry, comp, ctrl, fx.n_in, fx.n_out,
                                      fx.preset, indent=indent,
-                                     vst2_ident=ident))
+                                     vst2_ident=ident, raw_state=raw))
             chain.append('%sPRESETNAME %s' % (indent, q(fx.preset)))
             chain.append('%sFLOATPOS 0 0 0 0' % indent)
             chain.append('%sFXID %s' % (indent, guid_from('fx', i, k, fx.name)))

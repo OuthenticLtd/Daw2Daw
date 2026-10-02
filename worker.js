@@ -26,7 +26,7 @@ async function boot() {
   });
   ff.setLogger(({ message }) => ffLog.push(message));
   post('status', { text: 'Loading the converter…' });
-  const z = await (await fetch('converter.zip?v=8727e234e4', { cache: 'no-cache' })).arrayBuffer();
+  const z = await (await fetch('converter.zip?v=d91732a78e', { cache: 'no-cache' })).arrayBuffer();
   py.FS.writeFile('/tmp/converter.zip', new Uint8Array(z));
   py.runPython(`
 import zipfile, sys
@@ -160,9 +160,10 @@ async function convert(msg) {
   const outDir = dirOf(src) + '/' + stem + suffix;
   const out = outDir + '/' + stem + ext;
   py.globals.set('SRC', src); py.globals.set('OUT', out); py.globals.set('OUTDIR', outDir);
+  py.globals.set('PLUGFMT', msg.pluginFormat || 'source');
   const res = py.runPython(`
 import webshim
-rc, rc2 = webshim.convert(SRC, OUT)
+rc, rc2 = webshim.convert(SRC, OUT, PLUGFMT)
 z = None
 if rc == 0:
     z = webshim.zip_folder(OUTDIR, '/tmp/result.zip')

@@ -368,6 +368,14 @@
           <div class="select"><select id="target"></select></div>
           <button class="primary" id="go" type="button">Convert <span class="go-arrow" aria-hidden="true">→</span></button>
         </div>
+        <label for="plugfmt">Third-party plug-ins</label>
+        <div class="pick">
+          <div class="select"><select id="plugfmt">
+            <option value="source">Keep the format each was saved in</option>
+            <option value="vst3">Use the VST3 build where there is one</option>
+            <option value="vst2">Use the VST2 build where there is one</option>
+          </select></div>
+        </div>
       </div>
 
       <div id="prog" hidden aria-hidden="true">
@@ -457,7 +465,7 @@ function addLog(t) {
   UI.fromLog(logText);
 }
 
-const worker = new Worker('worker.js?v=3addf4f37e');
+const worker = new Worker('worker.js?v=a7f5d6d821');
 worker.onmessage = (e) => {
   const m = e.data;
   if (m.type === 'status') setStatus(m.text);
@@ -532,7 +540,8 @@ $('go').onclick = () => {
   if (busy) return;
   busy = true; $('go').disabled = true; resetRun(); UI.show();
   setStatus('Converting…');
-  worker.postMessage({ type: 'convert', project: $('project').value, target: $('target').value });
+  worker.postMessage({ type: 'convert', project: $('project').value, target: $('target').value,
+                      pluginFormat: $('plugfmt').value });
 };
 
 function done(m) {

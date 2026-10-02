@@ -300,6 +300,18 @@ class PluginIndex:
         The saved state may only be handed to a plug-in we matched exactly:
         a VST2 chunk means nothing to the VST3 build of the same effect."""
         uid = (fx.uid or '').upper()
+        if (getattr(fx, 'format', '') or '') == 'VST' and fx.vst2_id is not None:
+            # a VST2 as REAPER or Live loaded it, or as the converter made it
+            # (plugin_formats): the VST2 build, found by its numeric id - not
+            # its VST3 build, whose state reads differently
+            e = self.by_num.get(int(fx.vst2_id) & 0xFFFFFFFF) or self.by_num.get(int(fx.vst2_id))
+            if e is not None and not e['vst3']:
+                return e, True
+            from .cubase_only import is_cubase_only
+            if fx.name and not is_cubase_only(uid):
+                return {'num': int(fx.vst2_id) & 0xFFFFFFFF, 'uid': None, 'disp': fx.name,
+                        'file': fx.name + '.dll', 'inst': bool(fx.is_instrument),
+                        'vst3': False, 'synthetic': True}, True
         e = self.by_uid.get(uid)
         if e is not None:
             return e, True              # exact id match, state is usable
@@ -371,9 +383,13 @@ class PluginIndex:
 
 
 def vst_block(entry, component, controller, n_in=2, n_out=2, preset='',
-              indent='      ', vst2_ident=None):
-    """-> the RPP lines for one <VST ...> block (no BYPASS/WAK around it)."""
-    state = vst_state(component or b'', controller or b'')
+              indent='      ', vst2_ident=None, raw_state=None):
+    """-> the RPP lines for one <VST ...> block (no BYPASS/WAK around it).
+    A VST2's state is written as REAPER keeps it, raw (raw_state)."""
+    if raw_state is not None and not entry['vst3']:
+        state = raw_state
+    else:
+        state = vst_state(component or b'', controller or b'')
     head = vst_header(entry['num'], n_in, n_out, len(state))
     if entry['vst3']:
         kind = 'VST3i' if entry['inst'] else 'VST3'

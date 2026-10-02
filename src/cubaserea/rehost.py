@@ -295,7 +295,25 @@ def apply(p, log, index):
     same settings. Returns how many were replaced."""
     if os.environ.get('CPR_NO_REHOST'):
         return 0
+    # only a Cubase project needs it (Cubase 15 loads no VST2): REAPER and
+    # Live load the VST2 as it was saved
+    if os.environ.get('CPR_TARGET_EXT', '.cpr') not in ('.cpr', '.xml'):
+        return 0
     cands = candidates(p)
+    if not cands:
+        return 0
+    # the catalog first (plugin_formats): no REAPER needed for a plug-in it
+    # knows; REAPER re-hosts only what is left
+    from . import plugin_formats
+    left = []
+    for where, fx in cands:
+        try:
+            ok = plugin_formats.to_vst3(fx, log)
+        except Exception:
+            ok = False
+        if not ok:
+            left.append((where, fx))
+    cands = left
     if not cands:
         return 0
     n_dump = sum(1 for _w, fx in cands if getattr(fx, 'param_dump', False))

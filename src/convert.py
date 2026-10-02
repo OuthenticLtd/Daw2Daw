@@ -223,6 +223,10 @@ def main():
                          'supplies one record of each kind - an audio event, '
                          'an instrument track, a MIDI part, a marker - and '
                          'every track written is a copy of the matching one')
+    ap.add_argument('--plugin-format', choices=('source', 'vst3', 'vst2'), default='source',
+                    help="third-party plug-ins with both builds: keep each as it was saved "
+                         "(source), or turn it into its VST3 or its VST2 build, settings carried "
+                         "(plugin_formats.py) - for a machine where only the other build loads")
     ap.add_argument('-q', '--quiet', action='store_true')
     a = ap.parse_args()
 
@@ -295,7 +299,20 @@ def convert(a, out, bar):
     progress.stage('reading the REAPER plug-in list')
     idx_for_manifest = plugins.PluginIndex(a.reaper_ini, a.vst_dir)
     log = []
+    # what the project is written as decides which plug-in builds it can
+    # hold (rehost: a Cubase project needs every VST2 as its VST3)
+    os.environ['CPR_TARGET_EXT'] = os.path.splitext(out)[1].lower()
     p = load(a.input, log, out, idx_for_manifest)
+    fmt = getattr(a, 'plugin_format', 'source')
+    if os.path.splitext(out)[1].lower() == '.cpr':
+        if fmt == 'vst2':
+            log.append('Cubase 15 loads no VST2 plug-ins: each plug-in is written as its VST3 build')
+        fmt = 'vst3'
+    if fmt != 'source':
+        from cubaserea import plugin_formats
+        n = plugin_formats.apply(p, fmt, log)
+        if n:
+            log.append('%d plug-in(s) turned into their %s build' % (n, fmt.upper()))
     if a.no_fx:
         for t in p.tracks:
             t.fx = []
@@ -371,6 +388,9 @@ def convert(a, out, bar):
         # one that came from Cubase updates its own project in place.
         tmpl, how = cpr_write.find_template(a.input, a.template)
         if tmpl is None:
+            from cubaserea import plugin_formats, routing
+            routing.routes_as_folders(p, log)
+            plugin_formats.for_cubase(p, log)
             donor = a.donor or cpr_build.pick_donor(p)
             stats = cpr_build.write(p, out, donor=donor, log=log)
             extra = ('Cubase project built from the donor: %d audio track(s), '
