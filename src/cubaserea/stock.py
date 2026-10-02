@@ -49,6 +49,10 @@ TEMPLATES = {
                  'Y3Blcu5e7f4CAAAAAQAAAAAAAAACAAAAAAAAAAIAAAABAAAAAAAAAAIAAAAAAAAATAAAAAEAAAAAABAA',
                  'AAAAAP////8BAAAALAAAAAIAAAAAAAAAF9lOPvypcT4AAAAAcT0KPuOlGz5WDi0+yXY+PjvfTz6uR2E+IbByPkoMgj6DwAo/vHSTPg==',
                  'AAAQAAAA'),
+    'ReaXcomp': ('<VST "VST: ReaXcomp (Cockos)" reaxcomp.dll 0 "" 1919252579<5653547265786372656178636F6D7000> ""',
+                 'Y3hlcu5e7f4CAAAAAQAAAAAAAAACAAAAAAAAAAIAAAABAAAAAAAAAAIAAAAAAAAADAEAAAEAAAAAABAA',
+                 'OAAAAAQAAAAAAAAAAABpQAAAAAAAAPA/AAAAAAAA8D8AAAAAAAAAQAAAAAAAAAAADwAAAJYAAAAFAAAAEQAAAAAAAAAAQI9AAAAAAAAA8D8AAAAAAADwPwAAAAAAAABAAAAAAAAAAAAPAAAAlgAAAAUAAAARAAAAAAAAAACIs0AAAAAAAADwPwAAAAAAAPA/AAAAAAAAAEAAAAAAAAAAAA8AAACWAAAABQAAABEAAAAAAAAAAHDXQAAAAAAAAPA/AAAAAAAA8D8AAAAAAAAAQAAAAAAAAAAADwAAAJYAAAAFAAAAEQAAAAEAAAABAAAAAAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAgAAAA==',
+                 'AAAQAAAA'),
     'ReaEQ': ('<VST "VST: ReaEQ (Cockos)" reaeq.dll 0 "" 1919247729<56535472656571726561657100000000> ""',
               'cWVlcu5e7f4CAAAAAQAAAAAAAAACAAAAAAAAAAIAAAABAAAAAAAAAAIAAAAAAAAAzQAAAAEAAAAAABAA',
               None, 'AAAQAAAA'),
@@ -501,7 +505,9 @@ def from_cubase(fx, project=None):
         return [('js', 'loser/TransientController',
                  [clamp(5.0 * g('attackgain'), -100, 100), clamp(5.0 * g('releasegain'), -100, 100),
                   clamp(g('output'), -12.0, 6.0)])], 'approximate (Transient Controller)'
-    return None
+    # the rest of Cubase's own effects (natives.py, family by family)
+    from . import natives
+    return natives.from_cubase(fx, project)
 
 
 def lines(entries, indent='      ', bypass=0, offline=0, fxid=None):
@@ -549,6 +555,16 @@ def to_cubase(name, data, tempo=120.0):
     uid_of = dict((v[0], k) for k, v in builtins.TABLE.items())
     if name == 'ReaComp' and data and len(data) >= 8 + 4 * 17:
         v = [_f32(data, 8 + 4 * p) for p in range(17)]
+        if 20000.0 * v[7] >= 2000.0 and v[2] * 500.0 <= 5.0:
+            # its detector hears only the top, and fast: Cubase's DeEsser
+            rec = {'threshold': _db(v[0]), 'autothreshold': 0.0,
+                   'reduction': max(1.0, min(20.0, (1.0 + 99.0 * v[1]) - 1.0 if v[1] < 1 else 20.0)),
+                   'lowfreq': 20000.0 * v[7], 'highfreq': min(20000.0, 20000.0 * v[6]),
+                   'release': max(1.0, 5000.0 * v[3]), 'bypass': 0.0}
+            st = builtins.table_state('DeEsser', rec)
+            if st:
+                return (builtins.uid_of_name('DeEsser'), st, 'DeEsser',
+                        'close (Cubase DeEsser: ReaComp hearing only the sibilant band)')
         ratio_raw = v[1]
         # fitted on the probe's three ReaComp settings against a Cubase
         # export (2026-10-01): Cubase's release matches ReaComp's at the

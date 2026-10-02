@@ -1,0 +1,2 @@
+VST: ReaComp (Cockos)
+C:\Users\zhivko.vasilev\Desktop\DAW CONVERT\test\probe\reacomp.json.txt

@@ -68,6 +68,23 @@ def _records(state):
     out = {}
     o = 0
     data = state or b''
+    # the usual layout: u32 size of the rest, then 140-byte records whose
+    # 128-byte name field may hold leftover bytes after its NUL (Cubase's
+    # factory presets of Gate, Limiter, Expander, ... do) - read by stride
+    # (the leading u32 is not always the size - StudioEQ, DJ-Eq and
+    # VintageCompressor write other numbers there; the stride is what holds)
+    first = data[4:132].split(b'\0', 1)[0] if len(data) >= 144 else b''
+    if (len(data) - 4) % 140 == 0 and first[:1].isalpha() and first.isascii() \
+            and all(c == 95 or chr(c).isalnum() for c in first):
+        for o in range(4, len(data) - 139, 140):
+            name = data[o:o + 128].split(b'\0', 1)[0]
+            try:
+                key = name.decode('ascii')
+            except UnicodeDecodeError:
+                continue
+            if key:
+                out.setdefault(key, (o + 132, struct.unpack_from('<d', data, o + 132)[0]))
+        return out
     while o + 140 <= len(data):
         raw = data[o:o + 128]
         name = raw.split(b'\0', 1)[0]
@@ -128,6 +145,38 @@ TABLE = {
 }
 
 
+_DEFAULTS = None
+
+
+def defaults():
+    """name -> {uid, component, controller} of Cubase 15's own effects at
+    their defaults (cubase_defaults.json)."""
+    global _DEFAULTS
+    if _DEFAULTS is None:
+        import json
+        import os
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cubase_defaults.json')
+        try:
+            _DEFAULTS = json.load(open(p))
+        except OSError:
+            _DEFAULTS = {}
+    return _DEFAULTS
+
+
+def name_of_uid(uid):
+    """The Cubase effect a class id belongs to, if it is one of Cubase's own."""
+    uid = (uid or '').upper()
+    for k, v in defaults().items():
+        if v.get('uid', '').upper() == uid:
+            return k.split(' ')[0] if k.endswith(uid[:6]) else k
+    return None
+
+
+def uid_of_name(name):
+    t = defaults().get(name)
+    return t.get('uid') if t else None
+
+
 def _template(name):
     import base64
     import json
@@ -135,6 +184,10 @@ def _template(name):
     import zlib
     p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cubase_templates.json')
     t = json.load(open(p)).get(name)
+    if not t:
+        # every other Cubase effect at the defaults Cubase 15 itself saved
+        # (an empty state loaded and saved back - cubase_defaults.json)
+        t = defaults().get(name)
     if not t:
         return None, b''
     return (zlib.decompress(base64.b64decode(t['component'])),

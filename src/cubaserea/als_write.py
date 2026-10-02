@@ -995,6 +995,11 @@ class Writer:
         orig = getattr(f, 'reaper_stock', None)
         if orig:
             return live_stock.from_reaper(self, orig[0], orig[1])
+        js = getattr(f, 'reaper_js', None)
+        if js:
+            got = live_stock.from_js(self, js[0], js[1])
+            if got:
+                return [got]
         if getattr(f, 'native', False) and (f.name or '') in live_stock.REAPER_MAP:
             return live_stock.from_reaper(self, f.name,
                                           getattr(f, 'raw_state', None) or f.component)
@@ -1010,7 +1015,7 @@ class Writer:
             return [got] if got else None
         # one of Cubase's own effects - from a Cubase project, or what the
         # REAPER reader made of REAPER's own (its JS volume/width, ReaComp...)
-        if (f.name or '') in self.CUBASE_STOCK and (
+        if ((f.name or '') in self.CUBASE_STOCK or (f.uid or '').upper() in self.cubase_uids()) and (
                 getattr(self.p, 'pan_law_of', None) == 'cubase'
                 or (f.uid or '').upper() in self.cubase_uids()):
             return live_stock.from_cubase(self, f, self.p)
@@ -1045,6 +1050,7 @@ class Writer:
             ids |= {getattr(stock, n) for n in dir(stock) if n.endswith('_UID')}
             p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cubase_templates.json')
             ids |= {(v.get('uid') or '').upper() for v in json.load(open(p)).values()}
+            ids |= {(v.get('uid') or '').upper() for v in builtins.defaults().values()}
             cls._CUBASE_UIDS = {i for i in ids if i}
         return cls._CUBASE_UIDS
 

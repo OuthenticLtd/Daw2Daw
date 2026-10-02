@@ -47,6 +47,32 @@ STOCK = {
     'eq8': 'EQ Eight/Drums/Cymbal EQ 1.adv',
     'chorus': 'Chorus-Ensemble/Chorus Classic.adv',
     'autofilter': 'Auto Filter/Swirl.adv',
+    # the rest of Live's own audio effects, each one's settings rewritten
+    # by live_stock (a preset only carries the device's record)
+    'glue': 'Glue Compressor/Bass - Low Extender.adv',
+    'multiband': 'Multiband Dynamics/A Standard Multiband Comp.adv',
+    'eq3': 'EQ Three/Boost HiHats.adv',
+    'channeleq': 'Channel EQ/Boom Capture.adv',
+    'echo': 'Echo/Ambient Spaces/Diffused Long Cascades.adv',
+    'filterdelay': 'Filter Delay/Ambidel.adv',
+    'grain': 'Grain Delay/Ascent.adv',
+    'phaserflanger': 'Phaser-Flanger/Doubler Ether.adv',
+    'autopan': 'Auto Pan/1to4 Note Contenders.adv',
+    'saturator': 'Saturator/A Bit Warmer.adv',
+    'overdrive': 'Overdrive/Distort.adv',
+    'dyntube': 'Dynamic Tube/Broken Tube.adv',
+    'redux': 'Redux/Chiptune Filter.adv',
+    'erosion': 'Erosion/Hiss.adv',
+    'amp': 'Amp/Bass Roundup.adv',
+    'cabinet': 'Cabinet/1x12 Cab.adv',
+    'pedal': 'Pedal/Bass Guitar Front of Stage.adv',
+    'vinyl': 'Vinyl Distortion/Awfull.adv',
+    'drumbuss': 'Drum Buss/Bonzo on the Dials.adv',
+    'hybridreverb': 'Hybrid Reverb/Drums/Clap Hybrid.adv',
+    'shifter': 'Shifter/Autonomous Photon Ray.adv',
+    'corpus': 'Corpus/Bright Snare.adv',
+    'resonators': 'Resonators/Berlin.adv',
+    'vocoder': 'Vocoder/Chromatic.adv',
 }
 
 POINTEE_TAGS = ('AutomationTarget', 'ModulationTarget', 'Pointee')

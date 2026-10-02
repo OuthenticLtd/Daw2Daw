@@ -89,6 +89,27 @@ def compressor(w, data):
     _put(d, 'DryWet', 1.0 if dry <= 1e-6 else wet / (wet + dry))
     # RMS window: Live's envelope follower is peak (0) or RMS (1), not a time
     _set(d, 'Model', 1 if 100.0 * (v[13] or 0) >= 1.0 else 0)
+    # ReaComp's detector filters (bytes 32/36, Hz / 20000) are Live's side
+    # chain EQ: a band between them is its band pass (mode 1 - Ableton's
+    # own De-esser preset), a high pass alone mode 5 (its Glue "sidechain
+    # EQ" presets), a low pass alone mode 3
+    lp = 20000.0 * (_f32(data, 32) if len(data) >= 36 else 1.0)
+    hp = 20000.0 * (_f32(data, 36) if len(data) >= 40 else 0.0)
+    sc = d.find('.//SideChainEq')
+    if sc is not None and (hp > 20.0 or lp < 19000.0):
+        _set(sc, 'On', True)
+        if hp > 20.0 and lp < 19000.0:
+            f0 = math.sqrt(hp * lp)
+            _set(sc, 'Mode', 1)
+            _put(sc, 'Freq', f0)
+            _put(sc, 'Q', max(0.1, f0 / max(1.0, lp - hp)))
+        elif hp > 20.0:
+            _set(sc, 'Mode', 5)
+            _put(sc, 'Freq', hp)
+        else:
+            _set(sc, 'Mode', 3)
+            _put(sc, 'Freq', lp)
+        _put(sc, 'Gain', 0.0)
     return d, 'close (Live Compressor, same settings)'
 
 
@@ -460,6 +481,8 @@ def from_js(w, path, sliders):
     the channel mixer or Stillwell's Stereo Width makes. (device, how)
     or None."""
     lin = lambda db: 2.0 ** (db / 6.0)          # stock.js_db's inverse
+    if path in JS_MAP:
+        return JS_MAP[path](w, sliders)
     if path == 'utility/volume' and sliders:
         return utility(w, lin(sliders[0])), 'exact (Live Utility gain)'
     if path == 'utility/channelmixer' and len(sliders) >= 4:
@@ -502,9 +525,28 @@ def note_hz(n):
 
 
 def rev_compressor(d, tempo):
+    if int(_m(d, 'Model', 0)) == 2:
+        # the Expand model: REAPER's Downward Expander
+        from . import natives
+        return [natives.js_expander(_db(_m(d, 'Threshold', 0.1)), _m(d, 'ExpansionRatio', 1.15),
+                                    _m(d, 'Gain', 0.0), False, _m(d, 'Attack', 10.0),
+                                    min(100.0, _m(d, 'Release', 100.0)))], \
+            'close (REAPER Downward Expander)'
     ratio = _m(d, 'Ratio', 4.0)
     x = max(0.0, min(1.0, _m(d, 'DryWet', 1.0)))
     makeup = _m(d, 'Gain', 0.0)
+    lp, hp = 20000.0, 0.0
+    sc = d.find('.//SideChainEq')
+    if sc is not None and _m(sc, 'On', False):
+        mode, f0, q = int(_m(sc, 'Mode', 4)), _m(sc, 'Freq', 1000.0), max(0.1, _m(sc, 'Q', 0.71))
+        if mode == 1:
+            half = f0 / (2.0 * q)
+            hp = max(20.0, math.sqrt(half * half + f0 * f0) - half)
+            lp = min(20000.0, hp + f0 / q)
+        elif mode == 5:
+            hp = f0
+        elif mode == 3:
+            lp = f0
     data = stock.reacomp(threshold_db=_db(_m(d, 'Threshold', 1.0)),
                          ratio=min(ratio, 100.0), limit=ratio >= 100.0,
                          attack_ms=_m(d, 'Attack', 3.0), release_ms=_m(d, 'Release', 100.0),
@@ -514,6 +556,7 @@ def rev_compressor(d, tempo):
                          auto_makeup=bool(_m(d, 'GainCompensation', False)),
                          auto_release=bool(_m(d, 'AutoReleaseControlOnOff', False)),
                          dry_db=None if x >= 1.0 else _db(1.0 - x))
+    struct.pack_into('<ff', data, 32, min(1.0, lp / 20000.0), max(0.0, hp / 20000.0))
     return [('vst', 'ReaComp', data)], 'close (ReaComp, same settings)'
 
 
@@ -760,3 +803,136 @@ def template_uid(name):
     import os
     p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cubase_templates.json')
     return (json.load(open(p)).get(name) or {}).get('uid')
+
+
+# ------------------------------------------------- dynamics (natives.py)
+GLUE_RATIO = (2.0, 4.0, 10.0)
+GLUE_ATTACK = (0.01, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0)                  # ms
+GLUE_RELEASE = (100.0, 200.0, 400.0, 600.0, 800.0, 1200.0, None)       # ms, Auto
+
+
+def multiband(w, data):
+    """ReaXcomp -> Multiband Dynamics: three bands split where ReaXcomp's
+    first two end (a fourth band joins the high one); each band's
+    threshold and ratio above it (Live: ratio r in -1..0 is 1:1/(1+r)),
+    attack, release and gain."""
+    from . import natives
+    bands = natives.reaxcomp_bands(data) or []
+    if not bands:
+        return None
+    d = w.stock_device('multiband')
+    use = bands[:3]
+    if len(use) == 2:
+        # two bands: the upper one fills Live's middle and high bands alike
+        # (rev_multiband joins them again)
+        use = [use[0], dict(use[1], top_hz=14999.0), use[1]]
+    if len(bands) > 3:
+        w.log.append('a ReaXcomp band past the third has no place in Multiband Dynamics; '
+                     'its range plays through the high band')
+    _put(d, 'SplitLowMid', use[0]['top_hz'] if len(use) > 1 else 3000.0)
+    _put(d, 'SplitMidHigh', use[1]['top_hz'] if len(use) > 2 else 14999.0)
+    _set(d, 'SoftKnee', any(b['knee_db'] > 1.0 for b in use))
+    _set(d, 'EnvelopeIsPeak', all(b['rms_ms'] <= 1 for b in use))
+    _put(d, 'GlobalAmount', 1.0)
+    _put(d, 'GlobalTime', 1.0)
+    _put(d, 'OutputGain', 0.0)
+    for k, nm in enumerate(('Low', 'Mid', 'High')):
+        b = use[k] if k < len(use) else None
+        _set(d, 'Active' + nm, bool(b and b['active']))
+        if not b:
+            continue
+        R = max(1e-3, b['ratio'])
+        if R >= 1.0:
+            _put(d, 'AboveThreshold' + nm, b['threshold_db'])
+            _put(d, 'AboveRatio' + nm, 1.0 / R - 1.0)
+            _put(d, 'BelowThreshold' + nm, -80.0)
+            _put(d, 'BelowRatio' + nm, 0.0)
+        else:
+            _put(d, 'AboveThreshold' + nm, 0.0)
+            _put(d, 'AboveRatio' + nm, 0.0)
+            _put(d, 'BelowThreshold' + nm, b['threshold_db'])
+            _put(d, 'BelowRatio' + nm, max(-3.0, 1.0 - 1.0 / R))
+        _put(d, 'Attack' + nm, max(0.1, b['attack_ms']))
+        _put(d, 'Release' + nm, max(0.1, b['release_ms']))
+        _put(d, 'Gain' + nm, b['gain_db'])
+        _put(d, 'InputGain' + nm, 0.0)
+    return d, 'close (Live Multiband Dynamics, band for band)'
+
+
+def expander_js(w, sliders):
+    """REAPER's Downward Expander -> Live's Compressor in its Expand model
+    (its expansion ratio stops at 1:2)."""
+    v = list(sliders) + [0.0] * 7
+    d = w.stock_device('compressor')
+    _set(d, 'Model', 2)
+    _put(d, 'Threshold', _lin(v[0]))
+    if v[1] > 2.0:
+        w.log.append("an expansion ratio of %.1f is past Live Compressor's 1:2 and is set "
+                     "to that" % v[1])
+    _put(d, 'ExpansionRatio', max(1.0, min(2.0, v[1])))
+    _put(d, 'Attack', max(0.01, v[5]))
+    _put(d, 'Release', max(1.0, v[6]))
+    _put(d, 'Gain', v[2])
+    _set(d, 'GainCompensation', False)
+    _put(d, 'DryWet', 1.0)
+    return d, 'close (Live Compressor, Expand)'
+
+
+def rev_glue(d, tempo):
+    """Glue Compressor -> ReaComp: its stepped ratio, attack and release as
+    numbers (Release Auto is ReaComp's auto release), Makeup, Dry/Wet."""
+    from . import natives
+    ratio = GLUE_RATIO[max(0, min(2, int(_m(d, 'Ratio', 1))))]
+    att = GLUE_ATTACK[max(0, min(6, int(_m(d, 'Attack', 3))))]
+    rel = GLUE_RELEASE[max(0, min(6, int(_m(d, 'Release', 6))))]
+    ent = natives._comp(_m(d, 'Threshold', 0.0), ratio, att, rel or 400.0, _m(d, 'Makeup', 0.0),
+                        6.0, _m(d, 'DryWet', 1.0), auto_release=rel is None)
+    return ent, "close (ReaComp; the Glue's soft clip and range are not carried)"
+
+
+def rev_multiband(d, tempo):
+    """Multiband Dynamics -> ReaXcomp: the three bands' compression above
+    their thresholds (below-threshold processing has no ReaXcomp place)."""
+    from . import natives
+    bands = []
+    tops = (_m(d, 'SplitLowMid', 120.0), _m(d, 'SplitMidHigh', 2500.0), 24000.0)
+    below = False
+    for k, nm in enumerate(('Low', 'Mid', 'High')):
+        r = _m(d, 'AboveRatio' + nm, 0.0)
+        R = 1.0 / max(1e-3, 1.0 + r)
+        thr = _m(d, 'AboveThreshold' + nm, 0.0)
+        br, bt = _m(d, 'BelowRatio' + nm, 0.0), _m(d, 'BelowThreshold' + nm, -80.0)
+        if abs(r) < 1e-4 and br < -1e-4 and bt > -79.0:
+            # a band that only expands below its threshold: ReaXcomp's
+            # ratio under 1 does that
+            R, thr = 1.0 / (1.0 - br), bt
+        else:
+            below = below or (bt > -79.0 and abs(br) > 1e-3)
+        bands.append(dict(top_hz=tops[k], gain_db=_m(d, 'Gain' + nm, 0.0) + _m(d, 'InputGain' + nm, 0.0),
+                          threshold_db=thr, ratio=R,
+                          knee_db=6.0 if _m(d, 'SoftKnee', True) else 0.0,
+                          attack_ms=_m(d, 'Attack' + nm, 10.0) * _m(d, 'GlobalTime', 1.0),
+                          release_ms=_m(d, 'Release' + nm, 100.0) * _m(d, 'GlobalTime', 1.0),
+                          rms_ms=0.0 if _m(d, 'EnvelopeIsPeak', False) else 5.0, makeup=False,
+                          active=bool(_m(d, 'Active' + nm, True))))
+    # neighbours with the same settings are one band (multiband() splits
+    # a two-band ReaXcomp so)
+    keys = ('gain_db', 'threshold_db', 'ratio', 'knee_db', 'attack_ms', 'release_ms', 'rms_ms', 'active')
+    joined = [bands[0]]
+    for b in bands[1:]:
+        if all(abs(float(b[k]) - float(joined[-1][k])) < 1e-6 for k in keys):
+            joined[-1] = dict(joined[-1], top_hz=b['top_hz'])
+        else:
+            joined.append(b)
+    ent = [('vst', 'ReaXcomp', natives.reaxcomp(joined))]
+    og = _m(d, 'OutputGain', 0.0)
+    if abs(og) > 1e-6:
+        ent.append(('js', 'utility/volume', [stock.js_db(_lin(og)), 150.0]))
+    return ent, 'close (ReaXcomp, band for band%s)' % (
+        '; its below-threshold settings are not carried' if below else '')
+
+
+REAPER_MAP['ReaXcomp'] = multiband
+LIVE_MAP['GlueCompressor'] = rev_glue
+LIVE_MAP['MultibandDynamics'] = rev_multiband
+JS_MAP = {'sstillwell/expander': expander_js}

@@ -498,6 +498,33 @@ def finish_fx(t, p, log):
                 fx.controller = b''
                 fx.native = False
                 fx.raw_group = None
+    # the rest of REAPER's own effects that one of Cubase's own plays
+    # (natives.py): ReaXcomp, and the JS effects it maps
+    from . import natives
+    tempo = p.tempo[0][1] if p.tempo else 120.0
+    for fx in t.fx:
+        if not fx.native or fx.offline:
+            continue
+        nm = fx.name or ''
+        if nm == 'ReaXcomp':
+            key, payload = 'ReaXcomp', getattr(fx, 'raw_state', None) or fx.component
+        elif nm.startswith('JS: '):
+            key, payload = 'JS:' + nm[4:].strip(), natives.js_sliders(fx)
+        else:
+            continue
+        got = natives.to_cubase(key, payload, tempo)
+        if not got:
+            continue
+        uid, st, cname, how = got
+        if key == 'ReaXcomp':
+            fx.reaper_stock = ('ReaXcomp', payload)
+        else:
+            fx.reaper_js = (key[3:], payload)
+        log.append('%r: %s -> %s' % (t.name, nm, how))
+        fx.uid, fx.component, fx.name = uid, st, cname
+        fx.controller = b''
+        fx.native = False
+        fx.raw_group = None
 
 
 def read(path, log=None, _depth=0, printer=None, index=None):
