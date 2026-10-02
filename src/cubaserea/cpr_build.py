@@ -2105,6 +2105,49 @@ class Builder:
         find_in(root, a).splice(a, a + 2, struct.pack('>H', flags))
         return True
 
+    def nearest_palette(self, rgb):
+        pal = self.reader.palette
+        if not rgb or not pal:
+            return None
+        r, g, b = rgb
+        return min(range(len(pal)), key=lambda i: (pal[i][0] - r) ** 2 + (pal[i][1] - g) ** 2
+                   + (pal[i][2] - b) ** 2)
+
+    def event_block(self, root, proto_item, item):
+        """The attribute block after an event's clip or part, written whole:
+        its own colour ('Farb', a palette index) and pitch ('FtiP', a
+        frequency ratio). Both are added to a donor event that has none -
+        the count raised, the records after it, as Cubase writes them; a
+        block the donor already fills is left as it is (its colour value
+        still written over). Returns (coloured, pitched)."""
+        org = proto_item.origin or {}
+        idx = self.nearest_palette(getattr(item, 'color', None))
+        semis = float(getattr(item, 'pitch', 0.0) or 0.0) if item.kind == 'audio' else 0.0
+        if org.get('farb_off') and idx is not None:
+            a = org['farb_off'] - self.base
+            find_in(root, a).splice(a, a + 8, struct.pack('>q', idx))
+            return True, False
+        blk = org.get('ev_attrs')
+        if not blk or blk[1] != 0 and item.kind == 'audio':
+            return False, False
+        co, n = blk
+        recs = b''
+        k = 0
+        if idx is not None:
+            recs += b'braF' + struct.pack('>H', 1) + struct.pack('>q', idx)
+            k += 1
+        if abs(semis) > 1e-6:
+            recs += b'FtiP' + struct.pack('>H', 4) + struct.pack('>d', 2.0 ** (semis / 12.0))
+            k += 1
+        if not k:
+            return False, False
+        a = co - self.base
+        find_in(root, a).splice(a, a + 4, struct.pack('>I', n + k) + recs)
+        return idx is not None, abs(semis) > 1e-6
+
+    def write_event_color(self, root, proto_item, item):
+        return self.event_block(root, proto_item, item)[0]
+
     def write_zorder(self, root, proto_item, item, serial):
         """The event's front-to-back serial (u32 after the clip; cpr_read
         reads it as Item.zorder). Cubase plays the overlapping event with
@@ -2118,22 +2161,9 @@ class Builder:
         return True
 
     def write_pitch(self, root, proto_item, item):
-        """A REAPER item's pitch shift (semitones) as the event's 'FtiP'
-        record: the u32 count before the serial becomes 1 and the record -
-        tag, u16 version 4, f64 frequency ratio - is inserted after it
-        (cpr_read reads the same back). The donor's event has no such
-        record, so the count is 0 there."""
-        semis = float(getattr(item, 'pitch', 0.0) or 0.0)
-        off = (proto_item.origin or {}).get('zorder_off')
-        if not off or abs(semis) < 1e-6:
-            return False
-        a = off - self.base - 4
-        if struct.unpack_from('>I', self.A.d, a)[0] != 0:
-            return False        # the donor's event already carries records
-        rec = (struct.pack('>I', 1) + b'FtiP' + struct.pack('>H', 4)
-               + struct.pack('>d', 2.0 ** (semis / 12.0)))
-        find_in(root, a).splice(a, a + 4, rec)
-        return True
+        """A REAPER item's pitch shift as the event's 'FtiP' record
+        (event_block, which writes it with the colour)."""
+        return self.event_block(root, proto_item, item)[1]
 
     def write_ara(self, root, proto_item, guid, event_guid):
         """A Melodyne event's IDs (the prototype's, DONOR_MELODYNE).
@@ -3853,6 +3883,8 @@ def write(new, path, donor=None, log=None):
                           B.tempo.ticks(pt.pos + pt.length)
                           - B.tempo.ticks(pt.pos))
                 B.write_event_flags(slot, pr_item, pt)
+                if B.write_event_color(slot, pr_item, pt):
+                    stats['coloured events'] = stats.get('coloured events', 0) + 1
                 stats['parts'] += 1
                 stats['notes'] += n
             oc = pr_t.src.get('own_count_off')
@@ -3986,6 +4018,8 @@ def write(new, path, donor=None, log=None):
                                    str(uuid.uuid4()).upper()):
                         stats['Melodyne events'] = stats.get('Melodyne events', 0) + 1
                 B.write_zorder(slot, pr, item, serial)
+                if B.write_event_color(slot, pr, item):
+                    stats['coloured events'] = stats.get('coloured events', 0) + 1
                 if B.write_pitch(slot, pr, item):
                     stats['pitched events'] = stats.get('pitched events', 0) + 1
                 if B.write_curve(slot, pr, item):

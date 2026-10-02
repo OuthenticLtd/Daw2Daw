@@ -1900,6 +1900,7 @@ class CprReader:
         # events came out named "mediaId" with a gain from stray bytes.
         n_extra, q = A.u32(o)
         if 0 <= n_extra <= 8 and q + 14 * n_extra + 4 <= ev.de:
+            it.origin['ev_attrs'] = (A.base + o, n_extra)
             ratio = None
             ratio_off = None
             stretch = None
@@ -1920,6 +1921,14 @@ class CprReader:
                         stretch = val
                     elif tag == b'FtiP' and 0.25 <= val <= 4.0:
                         ratio, ratio_off = val, q - 8
+                elif kind == 1:
+                    val, q = A.i64(q)
+                    if tag == b'braF' and self.palette:
+                        # 'Farb' backwards: the event's own colour, the
+                        # palette's index (Colorize Selected Events, the
+                        # tenth swatch saved as 9); no 'Farb', the track's
+                        it.color = self.palette[int(val) % len(self.palette)]
+                        it.origin['farb_off'] = A.base + q - 8
                 elif kind == 0x82:
                     q += 8      # an i64 reference to an object written before
                                 # ('vPFC' on events copied from another one)
@@ -2588,6 +2597,18 @@ class CprReader:
         it.ticks = length
         it.ppq = PPQ
         it.events = ev_area
+        # after the part: the event's attribute block, as on an audio event
+        # ('Farb' its own colour, a palette index)
+        try:
+            where = {}
+            at, _q = self.at.fourcc(part.de, ev.de, where)
+            ev_origin['ev_attrs'] = (A.base + part.de, where.get('count', 0))
+            farb = at.get('Farb')
+            if isinstance(farb, int) and self.palette:
+                it.color = self.palette[farb % len(self.palette)]
+                ev_origin['farb_off'] = A.base + where['keys']['Farb'][0]
+        except Exception:
+            pass
         track.items.append(it)
 
 
