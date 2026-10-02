@@ -26,7 +26,7 @@ async function boot() {
   });
   ff.setLogger(({ message }) => ffLog.push(message));
   post('status', { text: 'Loading the converter…' });
-  const z = await (await fetch('converter.zip?v=8bb98c6641', { cache: 'no-cache' })).arrayBuffer();
+  const z = await (await fetch('converter.zip?v=bfe8050b24', { cache: 'no-cache' })).arrayBuffer();
   py.FS.writeFile('/tmp/converter.zip', new Uint8Array(z));
   py.runPython(`
 import zipfile, sys
@@ -137,10 +137,10 @@ for d, dirs, files in os.walk('${ROOT}'):
     top = os.path.normpath(d) == os.path.normpath('${ROOT}')
     # earlier conversions inside a project folder are not offered again -
     # but a converted folder dropped on its own is the project
-    dirs[:] = [x for x in dirs if x.lower() not in ('auto saves', 'backups', '__macosx')
-               and (top or not x.endswith((' (Cubase)', ' (REAPER)')))]
+    dirs[:] = [x for x in dirs if x.lower() not in ('auto saves', 'backups', 'backup', 'ableton project info', '__macosx')
+               and (top or not x.endswith((' (Cubase)', ' (REAPER)', ' (Live)')))]
     for f in files:
-        if f.lower().endswith(('.cpr', '.rpp')):
+        if f.lower().endswith(('.cpr', '.rpp', '.als')):
             out.append(os.path.relpath(os.path.join(d, f), '${ROOT}').replace(os.sep, '/'))
 sorted(out)
 `).toJs();
@@ -153,9 +153,12 @@ async function convert(msg) {
   const src = root + '/' + msg.project;
   const name = msg.project.split('/').pop();
   const stem = name.replace(/\.[^.]+$/, '');
-  const toCubase = /\.rpp$/i.test(name);
-  const outDir = dirOf(src) + '/' + stem + (toCubase ? ' (Cubase)' : ' (REAPER)');
-  const out = outDir + '/' + stem + (toCubase ? '.cpr' : '.rpp');
+  // msg.target: 'reaper' | 'cubase' | 'live'; without one, the other of the two
+  const target = msg.target || (/\.rpp$/i.test(name) ? 'cubase' : 'reaper');
+  const TARGETS = { reaper: [' (REAPER)', '.rpp'], cubase: [' (Cubase)', '.cpr'], live: [' (Live)', '.als'] };
+  const [suffix, ext] = TARGETS[target];
+  const outDir = dirOf(src) + '/' + stem + suffix;
+  const out = outDir + '/' + stem + ext;
   py.globals.set('SRC', src); py.globals.set('OUT', out); py.globals.set('OUTDIR', outDir);
   const res = py.runPython(`
 import webshim
@@ -168,10 +171,11 @@ if rc == 0:
   const [rc, rc2, z] = res;
   if (rc !== 0 || !z) { post('failed', { code: rc }); return; }
   const data = py.FS.readFile(z);
-  const zipName = stem + (toCubase ? ' (Cubase)' : ' (REAPER)') + '.zip';
+  const zipName = stem + suffix + '.zip';
   // the converted folder goes, the project stays loaded for another try
   py.runPython(`import shutil, os; shutil.rmtree(OUTDIR, ignore_errors=True); os.path.exists('/tmp/result.zip') and os.remove('/tmp/result.zip')`);
-  post('done', { zip: data.buffer, name: zipName, checked: rc2 === 0 }, [data.buffer]);
+  // rc2 is None when there is no check for the target (a Live Set)
+  post('done', { zip: data.buffer, name: zipName, checked: rc2 == null ? null : rc2 === 0 }, [data.buffer]);
 }
 
 self.onmessage = async (e) => {

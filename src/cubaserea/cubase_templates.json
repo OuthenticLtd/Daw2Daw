@@ -1,0 +1,65 @@
+{
+ "Limiter": {
+  "component": "eNpLYGZgyMwrKC1hGDjAicQuSs1JTSxOHTC3MMEYDvUOiaUl+QPpHi4kdn5pyYBGEguEavj////+otTi1BLfxAr3xMy8oNQUuruFB4mdVFmQWFw8cOEigMQGAGuUGqU=",
+  "controller": "eNoDAAAAAAE=",
+  "from": "20_Dazzle_Strikes_Splash.cpr / SFX"
+ },
+ "Brickwall Limiter": {
+  "component": "eNr7wMzAUJJRlFqckZ+TwjCgQIGBQeZAUWpOamJx6oA5ggnOEnFILC3JH0j3cCGxgTGUWuKbWOGemJkXlEr/mOJGYidVFiQWFw9cQuFDYudk5mUPZKLlh7M+2OeXpRYVJ+YW5AxQ8hVAcgsAJGYejw==",
+  "controller": "eNoDAAAAAAE=",
+  "from": "20_Dazzle_Strikes_FG.cpr / Percussion"
+ },
+ "Compressor": {
+  "component": "eNrFlU0OgjAQRvE34gJdufAILoyewC5MWLExeoBRhtBAKWmLgUt5Bo/kEYRoyMQDON30LV9mvn71fM9zqUGb6jz2mM/y+DTgpGZU8D+XeISBAOfglvG5DHp6HQzmCBbZXIbfuSQrJaBymtMnIMwd2xFhBRleSj6XMeFuR51PxeQzJ9m1OnFZgWzhndB3pCxrxU17OotcKukYXXaEY9MoWfO57Htat3O5I+eOZoTbnxFdBHUIsjjh/6tmQ/jalGAZ47v46bqqjHTMtKkt4Tf3YzlK",
+  "controller": "eNoDAAAAAAE=",
+  "from": "Acho.cpr / Pad"
+ },
+ "StereoDelay": {
+  "component": "eNrFlEkOgjAYRus84JA43UPjHpaYkLh2WaAkRCjEspCj6E3ceQETj+IRFIdaQvffv/qWL6/NuxuE+Cyi+ZJA73wq7mJmLE4TkXMPxDNTdoHBk4yh1EyUHTDmu9Tbo1hqcm2sIIwydnBgP6ZeZdlyEE1Drof5YbFhXpq/4dy+XmyYl5biJQ6P0Lq05dpZKeVQls6f5fru7grH0i26Erivp1pbsrsgnrmmuyg1U013USy9autgP6av6y6Ixqh2F+ZloOsuiGZY7i6wLoSMyt2FsowVFjdPqRA4loWyn+hXUnQ=",
+  "controller": "eNoDAAAAAAE=",
+  "from": "Crown_King_Hot.cpr / pad"
+ },
+ "EnvelopeShaper": {
+  "component": "eNq7wMTAkFhSkpicnZ6YmccwIIATQi34Wyd/AOKWnNS89JKMgXALF5g8cGZJobdDUWpOamJx6oAFDDeE8khL0ziQX1pSUFrCMGCAB4mdVFmQWFw8cG4RRGIDAPr0HAQ=",
+  "controller": "eNoDAAAAAAE=",
+  "from": "Three Pots Cherry.cpr / Bells"
+ },
+ "StereoEnhancer": {
+  "component": "eJxrYGFgKM9MKclgGAwg0iElNSexMj9vwFzAisQGu2XAXMLAwAhnqTgk5+fklxYNXMCwIbEhbhkolzAwMMFZKg65+Xn5+aUlA+YWZiR2UmVBYnHxgDmFgQuJDc7TYaUD5hZuJDYA90QXug==",
+  "controller": "eJwDAAAAAAE="
+ },
+ "Imager": {
+  "component": "eJzF0rkNwkAQheHhFPdZCUcOogtCG9vYEngX1sYiI6QDCiEgRaIhSmBB7Gg6eBP94afdd+kSJfutyjOdZxOCn7VEx/AAk1RdPP2ltRRJkMUozIBr/bVoL8V9UEe0tfheGigUp8H1XvB2pxhLSfR/uyAJUc2FvvF2UZghl9su7FmoK5q3C+I0ucR2ZxhLWfR/uyAJUd3F9cXbRWFGXG67sGehnmjeLojT4hLbnWMsFdFuLyAKjbncXlASor5o3guI0+b67cWoncJA7AWirSVVK/syBmNJuBpL/6w9A3J8LxK9S04hDGLvLtrEqtCxZ0KzURqgenC9Fx/sGWQu",
+  "controller": "eJwDAAAAAAE="
+ },
+ "RoomWorks": {
+  "uid": "56535452655641726F6F6D776F726B73",
+  "component": "eJzNlrtOwzAUhs39Xu63BfUB2JkqBwnRBwAxsbipQyzSJMQubZm6MCOxFSTUJ2BiYaIbSwYkJITKQIqgEp36BiXNaau8weEs3z9++uNjp5ogJCeK5B9M8j7doErkOKbEEKB8ffdFLaew7/EzNJdhQNVN1bsuuzknbysklxFA8viqRU1xYmIWMwoItn/fIxfMYsYA2tHNB5XiAvXsjgOCrctXyg1D6ILbegnHZQJQrVQeaUFklYmjEc0koOamWtT1+B63GFIrhEwBys3mW7jTBya3DLRVmu7x9sfvu6SZsFFcZgDazksj3GncXmZ7Ls/6Z98FrZc5QHjv1uk58wRTwsExISQBKD8chm+AY2WRNKKZj2WG+TCGswDQut+IKcX0UzyXRUDQ6TxRj1ucSbwnaQlQ8/1vmhWGkZd4Z3c5ljPMYraO18vKIAVhL1JhyqzGXDxHMYX4B7MWy7zoOh7iTq8PUptmSi6TEs9lI5Ylt1Hv3c1BatM/EMCEsQ==",
+  "controller": ""
+ },
+ "Gate": {
+  "uid": "3B660266B3CA4B57BBD487AE1E6C0D2A",
+  "component": "eJzFlU0OwiAQRlETrb8H0a17SDxC3bikdGqJSFtATVeeQ2/irkfqEcRFCSdwvoTkLV+Y+TJ1QogrDdiyUjnBzr4zXJ8B0WAb6NRx57i44LmMAvXUgAJu8X5mPECXMX5zFabPOmLstZ0E8jO6WkQTQqaBjsyKSiOqkFmgnlqhpHWA5jOPuJDKgXFtjVSlRaCeCtDepTDQ4LgsB2BP1hRc+FbjiPis/Hu/fvlQJe+YJ4AkEWdtzS1irTcR+xv9SGUOh5JLnYJw8r8d30X8BVq4PwA=",
+  "controller": ""
+ },
+ "Octaver": {
+  "uid": "4114D8E30C024C1DB0DE375FC53CDBED",
+  "component": "eJxzYGJgSMksYhgEgJNhQYBDfnKJ4UA6ghFCvfpvHw5yi9FAuoUJiZ1UWZBYXDxgTmFgRmIDAL74CwE=",
+  "controller": ""
+ },
+ "REVelation": {
+  "uid": "143AE812D7E249D8B503B4A6E3EFC9F8",
+  "component": "eJzFlTtSwzAQhpf3KzwLHh0FR6BJZbXpaN0h24ulGb+Q5IRQcQ04A1U6KnIk3wCUcbyj4QDszmj0ld+s/l11IwBT16XVrwhMdUw0EY3BDAs553LZCLjUL1waf+pOoLFYYOq4DDaJusi7MKYFYIso9n0p6lnasvVlm+jeuyidKz6ZnQGWC+/Cm95dookwOEWT8I31XsC9Syl15XTJkOH9AcTDui+rzPC4HBLFy97FzxKPChwQjQW5PBl8ZnA5GuBtGrwRj8xogNtPYZVsGNcunAScYWW102z/9ClRLHi3LsBZfz3+fC/ETGdOsZkAnBPFom5d7hcdm8tFwKmqTWt1lWMlk+L/U3xJ1EXkkmHD8VhXRGNBLkY6jtm+9ufjfVVfUTJvpLUMEuu6CfgXEF5wuw==",
+  "controller": ""
+ },
+ "PingPongDelay": {
+  "uid": "37A3AA84E3A24D069C39030EC68768E1",
+  "component": "eJw7wMbAkJKak1jJMBiAp0NJam5BfnFlXvIAuUAYzvpgD3JGXn5J6gA5hUEIQrEwMOg5pKWmpiQlJmcPlFsYIVTV//2KDmmZOSWpRT4D5RQGJjD54eSK92Uwt/jnDZBbmOGsD/YQt3gMkEvACQUCfM5Cw8VjwMKFFc76YJ+bWTFAroAANghVHlpq4VCQOFAhAgHsEMpMMDfEoSAjsXjAChcgKENiJ1UWJBYXD5hTGESQ2ADh2zGG",
+  "controller": ""
+ },
+ "MonoToStereo": {
+  "uid": "1AF350AC983B46CAB104990A0726EAD6",
+  "component": "eJxLYGZgKM9MKclgGHCw4P/+EIeU1JzEygF0BCOEapgZqeGQnJ+TXzSAbmGCMRrcHHLz8/LzS0sGzC3MSOykyoLE4uIBcwoDBxIbnHbDSgfMLVxIbAC+ehUq",
+  "controller": ""
+ }
+}
