@@ -1,4 +1,4 @@
-# DAW Converter (website)
+# Daw2Daw (website)
 
 Converts Cubase projects to REAPER and REAPER projects to Cubase, in the
 browser: https://outhenticltd.github.io/daw-converter/
