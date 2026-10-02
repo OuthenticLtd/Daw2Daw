@@ -36,7 +36,7 @@ CASES = {
         ('r_trans', 'reaper', [('js', 'loser/TransientController', [40.0, 0.0, 0.0])]),
     ],
     'distortion': [
-        ('c_dist', 'cubase', 'Distortion', {'boost': 40.0, 'output': -3.0}),
+        ('c_dist', 'cubase', 'Distortion', {'boost': 0.4, 'output': -3.0}),
         ('c_magneto', 'cubase', 'Magneto II', {'drive': 35.0}),
         ('c_softclip', 'cubase', 'SoftClipper', {'input': 4.0, 'output': -0.5}),
         ('r_dist', 'reaper', [('js', 'guitar/distortion', [24.0, 6.0, -6.0, 2.0])]),

@@ -515,7 +515,16 @@ def finish_fx(t, p, log):
         got = natives.to_cubase(key, payload, tempo)
         if not got:
             continue
-        uid, st, cname, how = got
+        uid, st, cname, how = got[:4]
+        if len(got) > 4:
+            # a level after it (Cubase's Volume): the effect has none of its own
+            k = t.fx.index(fx)
+            for uid2, st2, name2 in got[4]:
+                f2 = Fx()
+                f2.uid, f2.component, f2.name = uid2, st2, name2
+                f2.bypass, f2.offline = fx.bypass, fx.offline
+                f2.cubase_only = True       # REAPER and Live keep the original's level
+                t.fx.insert(k + 1, f2)
         if key in ('ReaXcomp', 'ReaPitch'):
             fx.reaper_stock = (key, payload)
         else:

@@ -98,11 +98,80 @@ def _records(state):
     return out
 
 
+# Cubase's Volume does not play its gain records as linear gain: renders
+# of the drum loop through it (Cubase 15) give this curve, record -> dB.
+# Exactly 1.0 is 0 dB and exactly 4.0 +12.04 dB, but 0.999 is -0.86 and
+# 3.999 +6.02: the curve is smooth around those two, so a level is written
+# as 1.0 when it is unity and off the curve's points otherwise, and a
+# Volume gives at most +6.02 dB (VOLUME_MAX_DB; more takes a second one).
+VOLUME_CURVE = ((0.02, -28.02), (0.05, -21.44), (0.1, -15.53), (0.15, -12.03), (0.2, -9.91),
+                (0.25, -8.43), (0.3, -7.31), (0.4, -5.58), (0.5, -4.17), (0.6, -3.17),
+                (0.7071, -2.35), (0.8, -1.79), (0.9, -1.28), (0.95, -1.058), (0.99, -0.892),
+                (0.999, -0.856), (1.001, -0.848), (1.01, -0.812), (1.05, -0.66), (1.1, -0.48),
+                (1.2, -0.16), (1.4142, 0.86), (1.5, 1.25), (1.75, 2.20), (2.0, 2.94), (2.5, 4.06),
+                (3.0, 4.87), (3.5, 5.51), (3.6, 5.617), (3.8, 5.827), (3.9, 5.925), (3.95, 5.973),
+                (3.99, 6.011), (3.999, 6.020))
+VOLUME_MAX_DB = 6.02
+
+
+def volume_db_of(rec):
+    """The level (dB) a Volume gain record plays at."""
+    import math
+    if rec <= 3e-8:
+        return -150.0
+    if abs(rec - 1.0) < 1e-12:
+        return 0.0
+    if rec >= 4.0:
+        return 12.04
+    c = VOLUME_CURVE
+    if rec <= c[0][0]:
+        # below the measured points: its slope there, per dB of the record
+        s = (c[1][1] - c[0][1]) / (20 * math.log10(c[1][0] / c[0][0]))
+        return c[0][1] + s * 20 * math.log10(rec / c[0][0])
+    for (x0, y0), (x1, y1) in zip(c, c[1:]):
+        if rec <= x1:
+            return y0 + (y1 - y0) * (rec - x0) / (x1 - x0)
+    return c[-1][1]
+
+
+def volume_record(lin):
+    """The Volume gain record that plays linear gain lin (to +6.02 dB)."""
+    import math
+    if lin <= 3e-8:
+        return 0.0
+    db = 20 * math.log10(lin)
+    if abs(db) < 0.005:
+        return 1.0
+    c = VOLUME_CURVE
+    if db >= c[-1][1]:
+        return c[-1][0]
+    if db <= c[0][1]:
+        s = (c[1][1] - c[0][1]) / (20 * math.log10(c[1][0] / c[0][0]))
+        return c[0][0] * 10 ** ((db - c[0][1]) / s / 20)
+    for (x0, y0), (x1, y1) in zip(c, c[1:]):
+        if db <= y1:
+            return x0 + (x1 - x0) * (db - y0) / (y1 - y0)
+    return c[-1][0]
+
+
+def volume_split(lin):
+    """Linear gain lin as Volumes' gains, each within one Volume's reach."""
+    import math
+    out = []
+    while lin > 10 ** (VOLUME_MAX_DB / 20) * (1 + 1e-9):
+        step = 10 ** (VOLUME_MAX_DB / 20)
+        out.append(step)
+        lin /= step
+    return out + [lin]
+
+
 def volume_params(state):
-    """(gain, channel 1 gain, channel 2 gain, bypass) of a Volume state."""
+    """(gain, channel 1 gain, channel 2 gain, bypass) of a Volume state,
+    the gains linear (what they play at)."""
     r = _records(state)
     g = lambda k, d: r[k][1] if k in r else d
-    return g('gain', 1.0), g('gain0', 1.0), g('gain1', 1.0), g('bypass', 0.0)
+    lin = lambda k: 10 ** (volume_db_of(g(k, 1.0)) / 20) if g(k, 1.0) > 3e-8 else 0.0
+    return lin('gain'), lin('gain0'), lin('gain1'), g('bypass', 0.0)
 
 
 def volume_state(gain=1.0, g0=1.0, g1=1.0, bypass=0.0):
@@ -112,7 +181,9 @@ def volume_state(gain=1.0, g0=1.0, g1=1.0, bypass=0.0):
     import zlib
     b = bytearray(zlib.decompress(base64.b64decode(_VOLUME_TEMPLATE)))
     r = _records(bytes(b))
-    for k, v in (('gain', gain), ('gain0', g0), ('gain1', g1), ('bypass', bypass)):
+    # the gains are linear, written as the records that play them
+    for k, v in (('gain', volume_record(gain)), ('gain0', volume_record(g0)), ('gain1', volume_record(g1)),
+                 ('bypass', bypass)):
         if k in r:
             struct.pack_into('<d', b, r[k][0], float(v))
     return bytes(b)

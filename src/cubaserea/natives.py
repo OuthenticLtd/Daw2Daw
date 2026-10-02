@@ -198,6 +198,26 @@ def c_vstdynamics(r, p):
         else ([('js', 'utility/volume', [0.0, 150.0])], 'exact (every section off)')
 
 
+# Cubase's Multiband Compressor makes up each band's gain by itself:
+# (1 - 1/ratio) * f(threshold) dB, f from renders of quiet noise that never
+# reaches the threshold (ratios 1.5..8 at -30 dB within 0.4 dB); the band's
+# Gain adds to it, negative too
+MBC_MAKEUP = ((0.0, 0.0), (-10.0, 1.12), (-20.0, 4.585), (-30.0, 10.8), (-40.0, 20.36))
+
+
+def mbc_makeup_db(threshold_db, ratio):
+    t = min(0.0, threshold_db)
+    pts = MBC_MAKEUP
+    for (t0, f0), (t1, f1) in zip(pts, pts[1:]):
+        if t >= t1:
+            f = f0 + (f1 - f0) * (t - t0) / (t1 - t0)
+            break
+    else:
+        (t0, f0), (t1, f1) = pts[-2], pts[-1]
+        f = f1 + (f1 - f0) * (t - t1) / (t1 - t0)
+    return (1.0 - 1.0 / max(1.0, ratio)) * f
+
+
 def c_multiband(r, p, expander=False):
     """MultibandCompressor / MultibandExpander: four bands, each up to its
     Freq crossover - ReaXcomp's bands exactly so. An expander's ratio
@@ -207,7 +227,9 @@ def c_multiband(r, p, expander=False):
     for k in range(1, 5):
         ratio = g('ratio%d' % k, 1.0)
         bands.append(dict(top_hz=g('freq%d' % k, 24000.0) if k < 4 else 24000.0,
-                          gain_db=g('makeup%d' % k, 0.0), threshold_db=g('threshold%d' % k, -15.0),
+                          gain_db=g('makeup%d' % k, 0.0) + (0.0 if expander else mbc_makeup_db(
+                              g('threshold%d' % k, -15.0), ratio)),
+                          threshold_db=g('threshold%d' % k, -15.0),
                           ratio=(1.0 / max(1.0, ratio)) if expander else max(1.0, ratio),
                           knee_db=0.0, attack_ms=g('attack%d' % k, 1.0), release_ms=g('release%d' % k, 500.0),
                           rms_ms=0.0, makeup=False,
@@ -395,7 +417,9 @@ def r_reaxcomp(data, tempo):
         rec.update({'threshold%d' % k: b['threshold_db'],
                     'ratio%d' % k: (1.0 / max(b['ratio'], 1e-3)) if expander else max(1.0, b['ratio']),
                     'attack%d' % k: max(0.1, b['attack_ms']), 'release%d' % k: max(10.0, b['release_ms']),
-                    'makeup%d' % k: b['gain_db'], 'byp%d' % k: 0.0 if b['active'] else 1.0,
+                    'makeup%d' % k: max(-24.0, b['gain_db'] - (0.0 if expander else mbc_makeup_db(
+                        b['threshold_db'], b['ratio']))),
+                    'byp%d' % k: 0.0 if b['active'] else 1.0,
                     ('autorelease%d' if expander else 'auto%d') % k: 1.0 if b['auto_release'] else 0.0})
         if k < 4:
             rec['freq%d' % k] = b['top_hz']
@@ -632,6 +656,14 @@ def _mix_db(mix_pct):
     return _db(wet) if wet > 0 else -100.0, _db(dry) if dry > 0 else -100.0
 
 
+# Cubase's Chorus / Flanger at a Mix play this much quieter than REAPER's
+# Stillwell Chorus / Flanger at the wet and dry that Mix crossfades to
+# (renders of the drum loop, its levels on Cubase's Volume measured):
+# their voices sum otherwise, so the level is carried across as this
+CHORUS_LVL_DB = 1.88
+FLANGER_LVL_DB = 1.45
+
+
 def c_chorus(r, p, unit=''):
     g = _g(r)
     wet, dry = _mix_db(g('mix' + unit, 50.0))
@@ -667,26 +699,30 @@ def c_flanger(r, p):
     fb = g('feedback', 50.0) / 100.0
     return [('js', JS_FLANGER, [max(0.0, min(200.0, g('delay', 2.0))),
                                 _db(fb) if fb > 1e-3 else -120.0, wet, dry,
-                                max(0.001, _rate(g, p, 'rate', 'temposync', 'syncnote', 1.0))])], \
-        'approximate (REAPER Flanger)'
+                                max(0.001, _rate(g, p, 'rate', 'temposync', 'syncnote', 1.0))])] \
+        + _out(-FLANGER_LVL_DB), 'approximate (REAPER Flanger)'
 
 
 def c_phaser(r, p):
     g = _g(r)
-    wet, _dry = _mix_db(g('mix', 50.0))
+    m = max(0.0, min(0.999, g('mix', 50.0) / 100.0))
+    k = m / (1.0 - m)                 # the JS's wet over its dry
     w = g('width', 50.0) / 100.0
     lo, hi = 300.0 * (1.0 - 0.8 * w), 300.0 + 3000.0 * w
     fb = g('feedback', 50.0) / 100.0
     return [('js', JS_PHASER, [max(0.0, min(10.0, _rate(g, p, 'rate', 'temposync', 'syncnote', 1.0))),
                                max(40.0, lo), min(20000.0, hi), max(-120.0, min(-1.0, _db(max(fb, 1e-6)))),
-                               max(-120.0, min(12.0, wet))])], 'approximate (REAPER Phaser)'
+                               max(-120.0, min(12.0, 6.0 * math.log2(max(k, 1e-6))))])] \
+        + _out(_db(1.0 - m)), 'approximate (REAPER Phaser)'
 
 
 def c_tremolo(r, p):
     g = _g(r)
-    depth = max(0.0, min(0.999, g('depth', 75.0) / 100.0))
+    # the JS's Amount is the gain's swing, 2^(dB/6) (its source: gain runs
+    # from 1 - a to 1): Cubase's depth as that swing
+    depth = max(0.001, min(1.0, g('depth', 75.0) / 100.0))
     return [('js', JS_TREMOLO, [max(0.0, min(100.0, _rate(g, p, 'rate', 'tempoSync', 'syncNote', 8.0))),
-                                max(-60.0, _db(1.0 - depth)), max(0.0, min(1.0, g('spatial', 0.0) / 100.0))])], \
+                                max(-60.0, 6.0 * math.log2(depth)), max(0.0, min(1.0, g('spatial', 0.0) / 100.0))])], \
         'close (REAPER Tremolo)'
 
 
@@ -710,11 +746,25 @@ def c_wahwah(r, p):
 
 
 CUBASE_TO_REAPER.update({
-    'Chorus': lambda r, p: ([c_chorus(r, p)], 'approximate (Stillwell Chorus)'),
+    'Chorus': lambda r, p: ([c_chorus(r, p)] + _out(-CHORUS_LVL_DB), 'approximate (Stillwell Chorus)'),
     'StudioChorus': c_studiochorus, 'Vibrato': c_vibrato, 'Cloner': c_cloner,
     'Flanger': c_flanger, 'Phaser': c_phaser, 'Tremolo': c_tremolo, 'AutoPan': c_autopan,
     'WahWah': c_wahwah,
 })
+
+
+def _crossfade(w, d):
+    """(Cubase Mix %, level dB after it) that play wet w + dry d (linear):
+    Cubase's crossfade gives wet min(1, 2 m), dry min(1, 2 (1 - m)), so the
+    ratio w / d picks m and the larger of the two is the level (renders:
+    a JS flanger at -6/-6 against Cubase's Flanger at 50 %, -6 dB)."""
+    if w + d <= 1e-9:
+        return 50.0, -150.0
+    if w <= d:
+        m, lvl = 0.5 * w / d, d
+    else:
+        m, lvl = 1.0 - 0.5 * d / w, w
+    return 100.0 * m, _db(lvl)
 
 
 def _crossfade_pct(wet_db, dry_db):
@@ -733,27 +783,30 @@ def r_chorus(sl, tempo):
     if v[1] <= 1 and v[5] <= -99:
         return 'Vibrato', {'rate': v[2], 'tempoSync': 0.0, 'depth': 100.0 * v[3], 'bypass': 0.0}, \
             'close (Cubase Vibrato)'
+    m, lvl = _crossfade(db2lin(v[4]) if v[4] > -99 else 0.0, db2lin(v[5]) if v[5] > -99 else 0.0)
     return 'Chorus', {'rate': v[2], 'temposync': 0.0, 'width': 100.0 * v[3], 'delay': v[0],
-                      'mix': _crossfade_pct(v[4], v[5]), 'bypass': 0.0}, 'approximate (Cubase Chorus)'
+                      'mix': m, 'bypass': 0.0}, 'approximate (Cubase Chorus)', lvl + CHORUS_LVL_DB
 
 
 def r_flanger(sl, tempo):
     v = list(sl) + [0.0] * 6
+    m, lvl = _crossfade(db2lin(v[2]) if v[2] > -119 else 0.0, db2lin(v[3]) if v[3] > -119 else 0.0)
     return 'Flanger', {'rate': v[4], 'temposync': 0.0, 'delay': max(0.1, v[0]),
                        'feedback': 100.0 * db2lin(v[1]) if v[1] > -119 else 0.0,
-                       'mix': _crossfade_pct(v[2], v[3]), 'bypass': 0.0}, 'approximate (Cubase Flanger)'
+                       'mix': m, 'bypass': 0.0}, 'approximate (Cubase Flanger)', lvl + FLANGER_LVL_DB
 
 
 def r_phaser(sl, tempo):
     v = list(sl) + [0.0] * 6
+    k = 2.0 ** (v[4] / 6.0)           # the JS's wet, its dry being 1
     return 'Phaser', {'rate': v[0], 'temposync': 0.0, 'width': max(0.0, min(100.0, (v[2] - 300.0) / 30.0)),
-                      'feedback': 100.0 * db2lin(v[3]), 'mix': 100.0 * min(1.0, db2lin(v[4]) / 2.0),
-                      'bypass': 0.0}, 'approximate (Cubase Phaser)'
+                      'feedback': 100.0 * 2.0 ** (v[3] / 6.0), 'mix': 100.0 * k / (1.0 + k),
+                      'bypass': 0.0}, 'approximate (Cubase Phaser, Volume after it)', _db(1.0 + k)
 
 
 def r_tremolo(sl, tempo):
     v = list(sl) + [0.0] * 4
-    return 'Tremolo', {'rate': v[0], 'tempoSync': 0.0, 'depth': 100.0 * (1.0 - db2lin(v[1])),
+    return 'Tremolo', {'rate': v[0], 'tempoSync': 0.0, 'depth': 100.0 * min(1.0, 2.0 ** (v[1] / 6.0)),
                        'spatial': 100.0 * v[2], 'bypass': 0.0}, 'close (Cubase Tremolo)'
 
 
@@ -787,10 +840,29 @@ def _out(db):
     return [('js', 'utility/volume', [stock.js_db(db2lin(db)), 150.0])] if abs(db) > 1e-6 else []
 
 
+# Level of each distortion over its input (renders of the drum loop):
+# Cubase's Distortion by its Boost (0..1, as saved), REAPER's Distortion
+# (hardness 6, max -6) by its Gain - the JS's own math, its render nulled
+DIST_CUBASE = ((0.0, 2.92), (0.1, -0.26), (0.25, 3.90), (0.5, 7.64), (1.0, 9.99))
+DIST_JS = ((0.0, 0.0), (5.0, 5.02), (10.0, 10.03), (15.0, 14.41), (20.0, 16.38), (25.0, 17.45),
+           (30.0, 18.22), (40.0, 19.88), (50.0, 21.89))
+
+
+def _interp(pts, x):
+    x = max(pts[0][0], min(pts[-1][0], x))
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        if x <= x1:
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+    return pts[-1][1]
+
+
 def c_distortion(r, p):
     g = _g(r)
-    return [('js', JS_DIST, [max(0.0, min(50.0, 0.5 * g('boost', 0.0))), 6.0, -6.0, 2.0])] + _out(g('output')), \
-        'approximate (REAPER Distortion)'
+    b = max(0.0, min(1.0, g('boost', 0.0)))
+    gain = 50.0 * b
+    lvl = _interp(DIST_CUBASE, b) + g('output') - _interp(DIST_JS, gain)
+    return [('js', JS_DIST, [gain, 6.0, -6.0, 2.0])] + _out(lvl), \
+        'approximate (REAPER Distortion, level matched)'
 
 
 def c_distroyer(r, p):
@@ -799,9 +871,25 @@ def c_distroyer(r, p):
         + _out(g('output')), 'approximate (REAPER Distortion)'
 
 
+def _sat_rise_db(amount):
+    foo = max(1e-6, amount) / 200.0 * math.pi
+    return _db(foo / math.sin(foo))
+
+
+def _sat_amount_for(rise_db):
+    lo, hi = 0.0, 100.0
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        if _sat_rise_db(mid) < rise_db:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
 def c_magneto(r, p):
     g = _g(r)
-    return [('js', JS_SAT, [max(0.0, min(100.0, g('drive', 20.0)))])] + _out(g('output')), \
+    return [('js', JS_SAT, [_sat_amount_for(0.042 * g('drive', 20.0))])] + _out(g('output')), \
         'approximate (REAPER Saturation)'
 
 
@@ -824,13 +912,16 @@ CUBASE_TO_REAPER.update({'Distortion': c_distortion, 'Distroyer': c_distroyer, '
 
 def r_dist(sl, tempo):
     v = list(sl) + [0.0] * 4
-    return 'Distortion', {'boost': max(0.0, min(100.0, 2.0 * v[0])), 'output': 0.0, 'mix': 100.0,
-                          'bypass': 0.0}, 'approximate (Cubase Distortion)'
+    b = max(0.0, min(1.0, v[0] / 50.0))
+    out = _interp(DIST_JS, v[0]) - _interp(DIST_CUBASE, b)
+    return 'Distortion', {'boost': b, 'output': max(-24.0, min(24.0, out)), 'mix': 100.0,
+                          'bypass': 0.0}, 'approximate (Cubase Distortion, level matched)'
 
 
 def r_sat(sl, tempo):
     v = list(sl) + [0.0]
-    return 'Magneto II', {'drive': max(0.0, min(100.0, v[0])), 'saturationOn': 1.0, 'output': 0.0,
+    return 'Magneto II', {'drive': max(0.0, min(100.0, _sat_rise_db(v[0]) / 0.042)), 'saturationOn': 1.0,
+                          'output': 0.0,
                           'bypass': 0.0}, 'approximate (Cubase Magneto II)'
 
 
@@ -1051,9 +1142,15 @@ def to_cubase(key, payload, tempo=120.0):
     got = fn(payload, tempo)
     if not got:
         return None
-    if len(got) == 4:
+    if len(got) == 4 and isinstance(got[1], (bytes, bytearray)):
         return got
-    name, rec, how = got
+    name, rec, how = got[:3]
+    post = got[3] if len(got) > 3 else 0.0
     st = builtins.table_state(name, rec)
     uid = builtins.uid_of_name(name)
-    return (uid, st, name, how) if st and uid else None
+    if not (st and uid):
+        return None
+    if abs(post) > 0.01:
+        return uid, st, name, how, [(builtins.VOLUME_UID, builtins.volume_state(part), 'Volume')
+                                    for part in builtins.volume_split(db2lin(post))]
+    return uid, st, name, how

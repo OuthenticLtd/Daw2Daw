@@ -62,14 +62,22 @@ def with_records(comp, recs):
 def main():
     out, name, cases = sys.argv[1], sys.argv[2], json.load(open(sys.argv[3]))
     os.makedirs(out, exist_ok=True)
+    src = sys.argv[sys.argv.index('--src') + 1] if '--src' in sys.argv else None
+    if src:
+        # a recording in place of the noise (dynamics need one)
+        import shutil
+        shutil.copy(src, os.path.join(out, 'noise.wav'))
     rng = np.random.default_rng(1)
     x = (rng.standard_normal((48000 * 4, 2)) * 0.1).clip(-1, 1)
-    w = wave.open(os.path.join(out, 'noise.wav'), 'wb')
-    w.setnchannels(2)
-    w.setsampwidth(2)
-    w.setframerate(48000)
-    w.writeframes((x * 32767).astype('<i2').tobytes())
-    w.close()
+    w = None if src else wave.open(os.path.join(out, 'noise.wav'), 'wb')
+    if w is None:
+        x = None
+    if w is not None:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(48000)
+        w.writeframes((x * 32767).astype('<i2').tobytes())
+        w.close()
     # name '-': each case names its own effect: [track, effect, records]
     if name == '-':
         cases = [(c[0], c[1], c[2]) for c in cases]
@@ -84,7 +92,7 @@ def main():
                 states[eff] = factory_effect(eff)
     L = ['<REAPER_PROJECT 0.1 "7.0/win64" 0', '  TEMPO 120 4 4', '  SAMPLERATE 48000 0 0']
     for tn, _e, _r in cases:
-        L += ['  <TRACK', '    NAME %s' % tn, '    <ITEM', '      POSITION 0', '      LENGTH 4',
+        L += ['  <TRACK', '    NAME %s' % tn, '    <ITEM', '      POSITION 0', '      LENGTH 8',
               '      <SOURCE WAVE', '        FILE "noise.wav"', '      >', '    >', '  >']
     L += ['>']
     rpp = os.path.join(out, 'bed.rpp')

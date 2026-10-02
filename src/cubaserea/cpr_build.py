@@ -3125,23 +3125,25 @@ def write(new, path, donor=None, log=None):
     curves_for_cubase(new)
     B = Builder(donor, log)
     B.project = new                 # for the pan mapping (cubase_mix)
-    # A level past Cubase's fader (+6.02 dB) goes on a Volume insert at the
-    # end of the chain - Cubase's own gain effect, measured on an export to
-    # be exact linear gain (4.0 -> +12.04 dB): pre-fader, after the other
-    # inserts, where REAPER's fader gain sits too. Banatul Dance's pianos
-    # (+10.42 dB) arrived 4.4 dB quiet with the fader simply stopped at +6.
+    # A level past Cubase's fader (+6.02 dB) goes on Volume inserts at the
+    # end of the chain - Cubase's own gain effect, its gain curve measured
+    # (builtins.VOLUME_CURVE), +6.02 dB each at most: pre-fader, after the
+    # other inserts, where REAPER's fader gain sits too. Banatul Dance's
+    # pianos (+10.42 dB) arrived 4.4 dB quiet with the fader simply stopped
+    # at +6.
     from .model import Fx as _Fx
     from . import builtins as _bi
     for t in new.tracks:
         v, _p = B.cubase_mix(t)
         if v > 2.0 + 1e-9:
             extra = v / 2.0
-            vfx = _Fx()
-            vfx.name = 'Volume'
-            vfx.uid = _bi.VOLUME_UID
-            vfx.component = _bi.volume_state(extra)
-            vfx.fader_overflow = True
-            t.fx = list(t.fx) + [vfx]
+            for part in _bi.volume_split(extra):
+                vfx = _Fx()
+                vfx.name = 'Volume'
+                vfx.uid = _bi.VOLUME_UID
+                vfx.component = _bi.volume_state(part)
+                vfx.fader_overflow = True
+                t.fx = list(t.fx) + [vfx]
             log.append('%r: its level (%+.2f dB) is past Cubase\'s fader '
                        '(+6.02 dB); the fader is at +6.02 and a Volume insert '
                        'at the end of the chain adds the other %+.2f dB'

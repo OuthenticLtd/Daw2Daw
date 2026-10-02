@@ -486,9 +486,17 @@ def from_js(w, path, sliders):
         return utility(w, lin(sliders[0])), 'exact (Live Utility gain)'
     if path == 'utility/channelmixer' and len(sliders) >= 4:
         ll, rr, lr, rl = (lin(v) for v in sliders[:4])
-        if abs(ll - 0.5) < 1e-3 and abs(lr - 0.5) < 1e-3:
-            return utility(w, 1.0, 1.0, True), 'exact (Live Utility, mono)'
-        return utility(w, 1.0, max(0.0, ll - lr)), 'exact (Live Utility width)'
+        if abs(ll - lr) < 1e-3 and abs(rr - rl) < 1e-3 and abs(ll - rr) < 1e-3:
+            # a mono fold at gain 2 ll
+            return utility(w, 2.0 * ll, 1.0, True), 'exact (Live Utility, mono)'
+        if abs(ll - rr) < 1e-3 and abs(lr - rl) < 1e-3:
+            # mid ll + lr, side ll - lr: Utility's gain and width
+            g = ll + lr
+            return utility(w, g, max(0.0, (ll - lr) / g) if g > 1e-9 else 1.0), 'exact (Live Utility gain, width)'
+        # its two sides at levels of their own: Utility has one gain - the
+        # sides' mean power, so the track's level carries
+        g = math.sqrt((ll * ll + lr * lr + rr * rr + rl * rl) / 2.0)
+        return utility(w, g, 1.0), "approximate (Live Utility, the sides' mean level)"
     if path == 'sstillwell/stereowidth' and len(sliders) >= 3:
         wb, cb, g = (10 ** (v / 20.0) for v in sliders[:3])
         return utility(w, 1.0, min(4.0, (1 + wb * math.sqrt(2)) / (1 + cb))), \
@@ -699,10 +707,18 @@ def rev_utility(d, tempo):
 def rev_chorus(d, tempo):
     x = max(0.0, min(1.0, _m(d, 'DryWet', 0.5)))
     og = _m(d, 'OutputGain', 1.0)
+    from . import natives
+    x, extra = _wet_gain(x, og)
+    if int(_m(d, 'Mode', 0)) == 2:
+        # Vibrato: Stillwell's Chorus all wet, one voice (r_chorus's Vibrato)
+        sl = [15.0, 1.0, max(0.1, min(16.0, _m(d, 'Rate', 0.6))), max(0.0, min(1.0, _m(d, 'Amount', 0.5))),
+              0.0, -100.0]
+        return [('js', 'sstillwell/chorus', sl)] + natives._out(_db(og)), 'close (Stillwell Chorus as a vibrato)'
     sl = [15.0, 3.0 if int(_m(d, 'Mode', 0)) == 1 else 2.0,
           max(0.1, min(16.0, _m(d, 'Rate', 0.6))), max(0.0, min(1.0, _m(d, 'Amount', 0.5))),
-          max(-100.0, _db(x * og)), max(-100.0, _db((1.0 - x) * og))]
-    return [('js', 'sstillwell/chorus', sl)], 'approximate (Stillwell Chorus)'
+          max(-100.0, _db(x)), max(-100.0, _db(1.0 - x))]
+    lvl = _interp(CHORUS_L, x) + extra - js_chorus_db(x, 1.0 - x)
+    return [('js', 'sstillwell/chorus', sl)] + natives._out(lvl), 'approximate (Stillwell Chorus, level matched)'
 
 
 def rev_autofilter(d, tempo):
@@ -873,9 +889,22 @@ def multiband(w, data):
 
 
 def expander_js(w, sliders):
-    """REAPER's Downward Expander -> Live's Compressor in its Expand model
-    (its expansion ratio stops at 1:2)."""
+    """REAPER's Downward Expander -> Live's Multiband Dynamics, its three
+    bands alike, expanding below the threshold (1:ratio). Live's
+    Compressor's Expand model raises what is above its threshold instead
+    (renders: +1.2 dB at 1:1.25, +3 dB at 1:2 over the dry)."""
     v = list(sliders) + [0.0] * 7
+    from . import natives
+    band = dict(top_hz=24000.0, gain_db=v[2], threshold_db=min(0.0, v[0] + EXPANDER_THR_OFFSET),
+                ratio=1.0 / max(1.0, v[1]),
+                knee_db=0.0, attack_ms=max(0.1, v[5]), release_ms=max(1.0, v[6]),
+                rms_ms=5.0 if int(v[4]) & 1 else 0.0, makeup=False, auto_release=False, active=True)
+    if v[1] > 4.0:
+        w.log.append("an expansion ratio of %.1f is past Live Multiband Dynamics' 1:4 and is set "
+                     "to that" % v[1])
+    got = multiband(w, natives.reaxcomp([dict(band, top_hz=120.0), dict(band, top_hz=2500.0), band]))
+    if got:
+        return got[0], 'approximate (Live Multiband Dynamics, below its threshold, level matched)'
     d = w.stock_device('compressor')
     _set(d, 'Model', 2)
     _put(d, 'Threshold', _lin(v[0]))
@@ -931,6 +960,14 @@ def rev_multiband(d, tempo):
     # neighbours with the same settings are one band (multiband() splits
     # a two-band ReaXcomp so)
     keys = ('gain_db', 'threshold_db', 'ratio', 'knee_db', 'attack_ms', 'release_ms', 'rms_ms', 'active')
+    if (all(all(abs(float(b[k]) - float(bands[0][k])) < 1e-6 for k in keys) for b in bands)
+            and bands[0]['ratio'] < 0.999 and bands[0]['active'] and abs(_m(d, 'OutputGain', 0.0)) < 1e-6):
+        # one expander over the whole range (expander_js): REAPER's
+        b = bands[0]
+        return [('js', natives.JS_EXPANDER, [b['threshold_db'] - EXPANDER_THR_OFFSET, 1.0 / b['ratio'],
+                                             b['gain_db'], 0.0,
+                                             3.0 if b['rms_ms'] > 0 else 2.0, b['attack_ms'], b['release_ms']])], \
+            'close (REAPER Downward Expander)'
     joined = [bands[0]]
     for b in bands[1:]:
         if all(abs(float(b[k]) - float(joined[-1][k])) < 1e-6 for k in keys):
@@ -1055,6 +1092,53 @@ for _p in ('delay/delay', 'delay/delay_tone', 'sstillwell/delay_tempo', 'sstillw
 # Phaser-Flanger's Mode: 0 phaser, 1 flanger, 2 doubler (its presets:
 # "Doubler ..." are 2); Auto Pan's Phase 0 moves both sides together (a
 # tremolo), 180 opposite (a pan).
+# Live's devices' level over their input by their settings (renders of
+# the drum loop in Live 11; OutputGain 1, PostDrive 0), and REAPER's JS
+# effects' by theirs (renders, or the JS's own math): a mapping matches
+# the two, the output gain carrying the difference
+def _interp(pts, x):
+    x = max(pts[0][0], min(pts[-1][0], x))
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        if x <= x1:
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+    return pts[-1][1]
+
+
+CHORUS_L = ((0.0, 0.0), (0.25, 0.90), (0.5, 1.72), (1.0, -0.38))
+FLANGER_L = ((0.0, 0.0), (0.25, 0.37), (0.5, 0.82), (1.0, 1.85))
+PHASER_L = ((0.0, 0.0), (0.25, 0.23), (0.5, 0.61), (0.75, 1.12), (1.0, 1.63))
+OVERDRIVE_L = ((0.0, -7.18), (10.0, -3.66), (25.0, 1.36), (40.0, 5.30), (60.0, 6.50), (80.0, 6.77),
+               (100.0, 6.99))
+SATURATOR_L0 = -1.77            # Analog Clip: PreDrive - 1.77 dB
+# Multiband Dynamics expanding below a threshold this much over the JS
+# Downward Expander's plays at its level (renders: thresholds +3..+10 dB)
+EXPANDER_THR_OFFSET = 8.6
+
+
+def _wet_gain(x, og):
+    """Chorus-Ensemble's / Phaser-Flanger's Output gain scales their wet
+    signal only (renders: 2.0 at 50 % wet is +3.6 dB, not +6): the Dry/Wet
+    and gain that play the same - (wet share, level dB)."""
+    wet, dry = x * og, 1.0 - x
+    if wet + dry <= 1e-9:
+        return x, -150.0
+    return wet / (wet + dry), _db(wet + dry)
+
+
+def js_chorus_db(wet, dry):
+    # Stillwell's Chorus: its voices' wet sums 1.71 x in power over the dry
+    return 10 * math.log10(max(1e-15, dry * dry + 1.71 * wet * wet))
+
+
+def js_flanger_db(wet, dry):
+    return 10 * math.log10(max(1e-15, dry * dry + 2.84 * wet * wet))
+
+
+def js_phaser_db(k):
+    # REAPER's Phaser adds the phased signal (k) to the dry
+    return 0.95 * 20 * math.log10(1.0 + k)
+
+
 def chorus_js(w, sl):
     v = list(sl) + [0.0] * 6
     d = w.stock_device('chorus')
@@ -1065,9 +1149,14 @@ def chorus_js(w, sl):
     _put(d, 'Feedback', 0.0)
     _put(d, 'Width', 1.0)
     wet, dry = (_lin(v[4]) if v[4] > -99 else 0.0), (_lin(v[5]) if v[5] > -99 else 0.0)
-    _put(d, 'DryWet', wet / (wet + dry) if wet + dry > 1e-9 else 0.5)
-    _put(d, 'OutputGain', min(2.0, wet + dry))
-    return d, 'approximate (Live Chorus-Ensemble)'
+    x = wet / (wet + dry) if wet + dry > 1e-9 else 0.5
+    _put(d, 'DryWet', x)
+    _put(d, 'OutputGain', 1.0)
+    if vib:
+        return d, 'close (Live Chorus-Ensemble, Vibrato)'
+    lvl = js_chorus_db(wet, dry) - _interp(CHORUS_L, x)
+    return [(d, 'approximate (Live Chorus-Ensemble, level matched)')] + \
+        ([(utility(w, _lin(lvl)), 'its level')] if abs(lvl) > 0.01 else [])
 
 
 def _phaserflanger(w, mode, rate, amount, feedback, mix, delay_s=None, center=None, gain=1.0):
@@ -1090,18 +1179,24 @@ def _phaserflanger(w, mode, rate, amount, feedback, mix, delay_s=None, center=No
 def flanger_js(w, sl):
     v = list(sl) + [0.0] * 6
     wet, dry = (_lin(v[2]) if v[2] > -119 else 0.0), (_lin(v[3]) if v[3] > -119 else 0.0)
+    x = wet / (wet + dry) if wet + dry > 1e-9 else 0.5
     d = _phaserflanger(w, 1, v[4], 0.5, _lin(v[1]) if v[1] > -119 else 0.0,
-                       wet / (wet + dry) if wet + dry > 1e-9 else 0.5, delay_s=max(0.0001, min(0.02, v[0] / 1000.0)),
-                       gain=wet + dry)
-    return d, 'approximate (Live Phaser-Flanger, Flanger)'
+                       x, delay_s=max(0.0001, min(0.02, v[0] / 1000.0)))
+    lvl = js_flanger_db(wet, dry) - _interp(FLANGER_L, x)
+    return [(d, 'approximate (Live Phaser-Flanger, Flanger, level matched)')] + \
+        ([(utility(w, _lin(lvl)), 'its level')] if abs(lvl) > 0.01 else [])
 
 
 def phaser_js(w, sl):
     v = list(sl) + [0.0] * 6
     lo, hi = max(70.0, v[1]), max(v[1] * 1.01, v[2])
-    d = _phaserflanger(w, 0, v[0], min(1.0, math.log2(hi / lo) / 5.0), _lin(v[3]),
-                       min(1.0, _lin(v[4]) / 2.0), center=math.sqrt(lo * hi))
-    return d, 'approximate (Live Phaser-Flanger, Phaser)'
+    k = 2.0 ** (v[4] / 6.0)           # the phased signal over the dry, added
+    x = k / (1.0 + k)
+    d = _phaserflanger(w, 0, v[0], min(1.0, math.log2(hi / lo) / 5.0), 2.0 ** (v[3] / 6.0),
+                       x, center=math.sqrt(lo * hi))
+    lvl = js_phaser_db(k) - _interp(PHASER_L, x)
+    return [(d, 'approximate (Live Phaser-Flanger, Phaser, level matched)')] + \
+        ([(utility(w, _lin(lvl)), 'its level')] if abs(lvl) > 0.01 else [])
 
 
 def _autopan(w, rate, amount, phase):
@@ -1118,7 +1213,7 @@ def _autopan(w, rate, amount, phase):
 
 def tremolo_js(w, sl):
     v = list(sl) + [0.0] * 3
-    return _autopan(w, v[0], 1.0 - _lin(v[1]), 170.0 * max(0.0, min(1.0, v[2]))), \
+    return _autopan(w, v[0], min(1.0, 2.0 ** (v[1] / 6.0)), 170.0 * max(0.0, min(1.0, v[2]))), \
         'close (Live Auto Pan as a tremolo)'
 
 
@@ -1145,19 +1240,25 @@ def rev_phaserflanger(d, tempo):
     og = _m(d, 'OutputGain', 1.0)
     fb = _m(d, 'Feedback', 0.0)
     from . import natives
+    x, extra = _wet_gain(x, og)
     if mode == 1:
         sl = [1000.0 * _m(d, 'FlangerDelayTime', 0.0025), _db(fb) if fb > 1e-3 else -120.0,
-              _db(x * og) if x > 0 else -120.0, _db((1 - x) * og) if x < 1 else -120.0, rate]
-        return [('js', natives.JS_FLANGER, sl)], 'approximate (REAPER Flanger)'
+              _db(x) if x > 0 else -120.0, _db(1 - x) if x < 1 else -120.0, rate]
+        lvl = _interp(FLANGER_L, x) + extra - js_flanger_db(x, 1.0 - x)
+        return [('js', natives.JS_FLANGER, sl)] + natives._out(lvl), 'approximate (REAPER Flanger, level matched)'
     if mode == 2:
         sl = [1000.0 * _m(d, 'DoublerDelayTime', 0.03), 1.0, rate, _m(d, 'Modulation_Amount', 0.3),
               _db(x) if x > 0 else -100.0, _db(1 - x) if x < 1 else -100.0]
         return [('js', natives.JS_CHORUS, sl)], 'approximate (Stillwell Chorus as a doubler)'
     c = _m(d, 'CenterFrequency', 1000.0)
     span = 2 ** (2.5 * _m(d, 'Modulation_Amount', 0.4))
-    sl = [rate, max(40.0, c / span), min(20000.0, c * span), max(-120.0, min(-1.0, _db(max(fb, 1e-6)))),
-          _db(2 * x) if x > 0 else -120.0]
-    return [('js', natives.JS_PHASER, sl)], 'approximate (REAPER Phaser)'
+    x = min(x, 0.999)
+    sl = [rate, max(40.0, c / span), min(20000.0, c * span),
+          max(-120.0, min(-1.0, 6.0 * math.log2(max(fb, 1e-6)))),
+          max(-120.0, min(12.0, 6.0 * math.log2(max(x / (1.0 - x), 1e-6))))]
+    k = x / (1.0 - x)
+    lvl = _interp(PHASER_L, x) + extra - js_phaser_db(k)
+    return [('js', natives.JS_PHASER, sl)] + natives._out(lvl), 'approximate (REAPER Phaser, level matched)'
 
 
 def rev_autopan(d, tempo):
@@ -1168,7 +1269,8 @@ def rev_autopan(d, tempo):
     amt = _m(d, 'Lfo/LfoAmount', 0.5)
     ph = _m(d, 'Lfo/Phase', 180.0)
     if ph < 175.0:
-        return [('js', natives.JS_TREMOLO, [rate, _db(max(1e-3, 1.0 - amt)), ph / 170.0])],             'close (REAPER Tremolo)'
+        return [('js', natives.JS_TREMOLO, [rate, 6.0 * math.log2(max(1e-3, amt)), ph / 170.0])], \
+        'close (REAPER Tremolo)'
     return [('js', natives.JS_PANNER, [min(20.0, rate), 100.0 * amt])], 'close (REAPER Ping Pong Pan)'
 
 
@@ -1182,20 +1284,28 @@ JS_MAP.update({'sstillwell/chorus': chorus_js, 'guitar/chorus': chorus_js, 'guit
 # ------------------------------------------ distortion (natives.py)
 def overdrive_js(w, sl):
     v = list(sl) + [0.0] * 4
+    from . import natives
     d = w.stock_device('overdrive')
-    _put(d, 'Drive', max(0.0, min(100.0, 2.0 * v[0])))
+    drive = max(0.0, min(100.0, 2.0 * v[0]))
+    _put(d, 'Drive', drive)
     _put(d, 'Tone', 50.0)
     _put(d, 'DryWet', 100.0)
     _put(d, 'BandWidth', 9.0)
-    return d, 'approximate (Live Overdrive)'
+    lvl = natives._interp(natives.DIST_JS, v[0]) - _interp(OVERDRIVE_L, drive)
+    return [(d, 'approximate (Live Overdrive, level matched)'),
+            (utility(w, _lin(lvl)), 'its level')]
 
 
 def saturator_js(w, sl):
     v = list(sl) + [0.0]
     d = w.stock_device('saturator')
     _set(d, 'Type', 0)
-    _put(d, 'PreDrive', 0.24 * max(0.0, min(100.0, v[0])))
-    _put(d, 'PostDrive', 0.0)
+    from . import natives
+    drive = 0.12 * max(0.0, min(100.0, v[0]))
+    _put(d, 'PreDrive', drive)
+    # Analog Clip plays PreDrive - 1.77 dB at these levels; the JS its
+    # small-signal rise
+    _put(d, 'PostDrive', max(-36.0, min(0.0, natives._sat_rise_db(v[0]) - drive - SATURATOR_L0)))
     _put(d, 'DryWet', 1.0)
     _set(d, 'ColorOn', False)
     return d, 'approximate (Live Saturator)'
@@ -1227,19 +1337,25 @@ def bits_js(w, sl):
 def rev_overdrive(d, tempo):
     from . import natives
     x = _m(d, 'DryWet', 100.0) / 100.0
-    ent = [('js', natives.JS_DIST, [0.5 * _m(d, 'Drive', 50.0), 6.0, -6.0, 2.0])]
+    drive = _m(d, 'Drive', 50.0)
+    ent = [('js', natives.JS_DIST, [0.5 * drive, 6.0, -6.0, 2.0])]
     if x < 0.999:
         pass                      # REAPER's Distortion has no mix; the drive carries it
-    return ent, 'approximate (REAPER Distortion)'
+    ent += natives._out(_interp(OVERDRIVE_L, drive) - natives._interp(natives.DIST_JS, 0.5 * drive))
+    return ent, 'approximate (REAPER Distortion, level matched)'
 
 
 def rev_saturator(d, tempo):
     from . import natives
     if int(_m(d, 'Type', 0)) == 1 and _m(d, 'PostClip', False):
         return [('js', natives.JS_CLIP, [max(0.0, min(9.0, _m(d, 'PreDrive', 0.0))),
-                                         max(-3.0, min(1.0, _m(d, 'PostDrive', 0.0)))])],             'close (REAPER Soft Clipper)'
-    return [('js', natives.JS_SAT, [max(0.0, min(100.0, _m(d, 'PreDrive', 0.0) / 0.24))])] \
-        + (natives._out(_m(d, 'PostDrive', 0.0))), 'approximate (REAPER Saturation)'
+                                         max(-3.0, min(1.0, _m(d, 'PostDrive', 0.0)))])], \
+        'close (REAPER Soft Clipper)'
+    pre, post = _m(d, 'PreDrive', 0.0), _m(d, 'PostDrive', 0.0)
+    amt = max(0.0, min(100.0, pre / 0.12))
+    return [('js', natives.JS_SAT, [amt])] \
+        + natives._out(pre + SATURATOR_L0 + post - natives._sat_rise_db(amt)), \
+        'approximate (REAPER Saturation, level matched)'
 
 
 def rev_tube(d, tempo):
