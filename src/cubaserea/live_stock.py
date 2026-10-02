@@ -738,6 +738,10 @@ def to_reaper(devs, tempo=120.0):
     while k < len(devs):
         d = devs[k]
         fn = LIVE_MAP.get(d.tag)
+        if d.tag in ('SpectrumAnalyzer', 'Spectrum', 'Tuner'):
+            out.append((d, [], 'a meter (no sound): left out'))
+            k += 1
+            continue
         if fn is None:
             out.append((d, None, None))
             k += 1
@@ -1173,3 +1177,177 @@ LIVE_MAP['AutoPan'] = rev_autopan
 JS_MAP.update({'sstillwell/chorus': chorus_js, 'guitar/chorus': chorus_js, 'guitar/flanger': flanger_js,
                'guitar/phaser': phaser_js, 'guitar/tremolo': tremolo_js, 'loser/ppp': panner_js,
                'guitar/wah': wah_js})
+
+
+# ------------------------------------------ distortion (natives.py)
+def overdrive_js(w, sl):
+    v = list(sl) + [0.0] * 4
+    d = w.stock_device('overdrive')
+    _put(d, 'Drive', max(0.0, min(100.0, 2.0 * v[0])))
+    _put(d, 'Tone', 50.0)
+    _put(d, 'DryWet', 100.0)
+    _put(d, 'BandWidth', 9.0)
+    return d, 'approximate (Live Overdrive)'
+
+
+def saturator_js(w, sl):
+    v = list(sl) + [0.0]
+    d = w.stock_device('saturator')
+    _set(d, 'Type', 0)
+    _put(d, 'PreDrive', 0.24 * max(0.0, min(100.0, v[0])))
+    _put(d, 'PostDrive', 0.0)
+    _put(d, 'DryWet', 1.0)
+    _set(d, 'ColorOn', False)
+    return d, 'approximate (Live Saturator)'
+
+
+def softclip_js(w, sl):
+    v = list(sl) + [0.0] * 2
+    d = w.stock_device('saturator')
+    _set(d, 'Type', 1)
+    _put(d, 'PreDrive', max(0.0, v[0]))
+    _put(d, 'PostDrive', min(0.0, v[1]))
+    _set(d, 'PostClip', True)
+    _put(d, 'DryWet', 1.0)
+    _set(d, 'ColorOn', False)
+    return d, 'approximate (Live Saturator, soft clip)'
+
+
+def bits_js(w, sl):
+    v = list(sl) + [16.0]
+    d = w.stock_device('redux')
+    _put(d, 'BitDepth', max(1.0, min(16.0, v[0])))
+    _put(d, 'SampleRate', 40000.0)
+    _set(d, 'EnablePreFilter', False)
+    _set(d, 'EnablePostFilter', False)
+    _put(d, 'DryWet', 1.0)
+    return d, 'close (Live Redux, bit depth)'
+
+
+def rev_overdrive(d, tempo):
+    from . import natives
+    x = _m(d, 'DryWet', 100.0) / 100.0
+    ent = [('js', natives.JS_DIST, [0.5 * _m(d, 'Drive', 50.0), 6.0, -6.0, 2.0])]
+    if x < 0.999:
+        pass                      # REAPER's Distortion has no mix; the drive carries it
+    return ent, 'approximate (REAPER Distortion)'
+
+
+def rev_saturator(d, tempo):
+    from . import natives
+    if int(_m(d, 'Type', 0)) == 1 and _m(d, 'PostClip', False):
+        return [('js', natives.JS_CLIP, [max(0.0, min(9.0, _m(d, 'PreDrive', 0.0))),
+                                         max(-3.0, min(1.0, _m(d, 'PostDrive', 0.0)))])],             'close (REAPER Soft Clipper)'
+    return [('js', natives.JS_SAT, [max(0.0, min(100.0, _m(d, 'PreDrive', 0.0) / 0.24))])] \
+        + (natives._out(_m(d, 'PostDrive', 0.0))), 'approximate (REAPER Saturation)'
+
+
+def rev_tube(d, tempo):
+    from . import natives
+    return [('js', natives.JS_SAT, [max(0.0, min(100.0, 4.0 * _m(d, 'PreDrive', 0.0) + 20.0))])] \
+        + natives._out(_m(d, 'PostDrive', 0.0)), 'approximate (REAPER Saturation)'
+
+
+def rev_pedal(d, tempo):
+    from . import natives
+    return [('js', natives.JS_DIST, [50.0 * _m(d, 'Gain', 0.5), 6.0, -6.0, 2.0])] \
+        + natives._out(_m(d, 'Output', 0.0)), 'approximate (REAPER Distortion)'
+
+
+def rev_redux(d, tempo):
+    from . import natives
+    note = '' if _m(d, 'SampleRate', 40000.0) >= 39000 else '; its sample-rate reduction is not carried'
+    return [('js', natives.JS_BITS, [max(1.0, min(32.0, round(_m(d, 'BitDepth', 16.0)))), 0.0, 0.0, 2.0])], \
+        'approximate (REAPER bit reduction%s)' % note
+
+
+LIVE_MAP.update({'Overdrive': rev_overdrive, 'Saturator': rev_saturator, 'Tube': rev_tube,
+                 'Pedal': rev_pedal, 'Redux2': rev_redux})
+JS_MAP.update({'guitar/distortion': overdrive_js, 'loser/Saturation': saturator_js,
+               'schwa/soft_clipper': softclip_js, 'utility/dither_psycho': bits_js})
+
+
+# ------------------------------- reverb, pitch, transients (natives.py)
+def shifter(w, data):
+    """ReaPitch -> Shifter in its pitch mode: the first voice's shift, the
+    blend of voice and dry."""
+    from . import natives
+    voices, dry = natives.reapitch_voices(data)
+    if not voices:
+        return None
+    semis, vol = voices[0]
+    d = w.stock_device('shifter')
+    _set(d, 'Global_ShifterMode', 0)
+    coarse = int(round(semis))
+    _put(d, 'Pitch_Coarse', coarse)
+    _put(d, 'Pitch_Fine', semis - coarse)
+    _put(d, 'Lfo_Amount', 0.0)
+    _put(d, 'Lfo_AmountPitch', 0.0)
+    _set(d, 'EnvelopeFollower_On', False)
+    _set(d, 'Delay_On', False)
+    tot = vol + dry
+    _put(d, 'Global_DryWet', vol / tot if tot > 1e-9 else 1.0)
+    if len(voices) > 1:
+        w.log.append('a ReaPitch with %d voices: Live Shifter plays the first' % len(voices))
+    return d, 'close (Live Shifter, pitch)'
+
+
+def rev_shifter(d, tempo):
+    if int(_m(d, 'Global_ShifterMode', 0)) != 0:
+        return None
+    semis = _m(d, 'Pitch_Coarse', 0.0) + _m(d, 'Pitch_Fine', 0.0)
+    x = max(0.0, min(1.0, _m(d, 'Global_DryWet', 1.0)))
+    return [('vst', 'ReaPitch', stock.reapitch([(semis, x)], dry=1.0 - x))], 'close (ReaPitch)'
+
+
+def rev_hybrid(d, tempo):
+    """Hybrid Reverb -> ReaVerbate: the room size whose decay is the
+    algorithm's (through Reverb's measured tables), pre-delay, damping,
+    Dry/Wet. Its convolution half and EQ are not carried."""
+    rt = _m(d, 'Algorithm_Decay', 2.0)
+    room = max(0.0, min(0.99, math.log(max(rt, 0.21) / 0.21) / math.log(9.72 / 0.21)))
+    x = max(0.0, min(1.0, _m(d, 'DryWet', 0.5)))
+    data = stock.reaverbate(wet_db=_db(x) - verb_level_db(room, 0.3) if x > 0 else -150.0,
+                            dry_db=_db(1 - x) if x < 1 else None, room=room,
+                            damping=max(0.0, min(1.0, _m(d, 'Algorithm_Damping', 0.3))),
+                            delay_ms=1000.0 * _m(d, 'PreDelay_Time', 0.0))
+    return [('vst', 'ReaVerbate', data)], 'approximate (ReaVerbate; the convolution and EQ are not carried)'
+
+
+def transient_js(w, sl):
+    """REAPER's Transient Controller -> Drum Buss with only its transient
+    shaping on."""
+    v = list(sl) + [0.0] * 3
+    d = w.stock_device('drumbuss')
+    _set(d, 'EnableCompression', False)
+    _put(d, 'DriveAmount', 0.0)
+    _put(d, 'CrunchAmount', 0.0)
+    _put(d, 'DampingFrequency', 20000.0)
+    _put(d, 'BoomAmount', 0.0)
+    _put(d, 'TransientShaping', max(-1.0, min(1.0, v[0] / 100.0)))
+    _put(d, 'InputTrim', 1.0)
+    _put(d, 'OutputGain', _lin(v[2]))
+    _put(d, 'DryWet', 1.0)
+    return d, 'approximate (Live Drum Buss, transients)'
+
+
+def rev_drumbuss(d, tempo):
+    """Drum Buss -> REAPER: its transient shaping (Transient Controller)
+    and drive (Saturation); its compressor, crunch and boom are not
+    carried."""
+    from . import natives
+    ent = []
+    tr = _m(d, 'TransientShaping', 0.0)
+    if abs(tr) > 1e-3:
+        ent.append(('js', 'loser/TransientController', [100.0 * tr, 0.0, 0.0]))
+    if _m(d, 'DriveAmount', 0.0) > 1e-3:
+        ent.append(('js', natives.JS_SAT, [100.0 * _m(d, 'DriveAmount', 0.0)]))
+    og = _m(d, 'OutputGain', 1.0) * _m(d, 'InputTrim', 1.0)
+    ent += natives._out(_db(og))
+    return (ent or [('js', 'utility/volume', [0.0, 150.0])]), \
+        'approximate (REAPER Transient Controller / Saturation)'
+
+
+REAPER_MAP['ReaPitch'] = shifter
+LIVE_MAP.update({'Shifter': rev_shifter, 'Hybrid': rev_hybrid, 'DrumBuss': rev_drumbuss})
+JS_MAP['loser/TransientController'] = transient_js

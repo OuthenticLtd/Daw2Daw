@@ -773,6 +773,149 @@ for _p, _f in ((JS_CHORUS, r_chorus), ('guitar/chorus', r_chorus), (JS_FLANGER, 
     REAPER_TO_CUBASE['JS:' + _p] = _f
 
 
+# ----------------------------------------------------------- distortion
+# A distortion's sound is its curve, which no other DAW's own effect has:
+# each maps to the closest kind (drive, saturation, soft clip, bit
+# reduction) with its amount, tone and level - approximate by nature.
+JS_DIST = 'guitar/distortion'        # gain dB 0..50, hardness 1..10, max volume dB
+JS_SAT = 'loser/Saturation'          # amount %
+JS_CLIP = 'schwa/soft_clipper'       # boost dB 0..9, output brickwall dB
+JS_BITS = 'utility/dither_psycho'    # bits, noise shaping, dither, width
+
+
+def _out(db):
+    return [('js', 'utility/volume', [stock.js_db(db2lin(db)), 150.0])] if abs(db) > 1e-6 else []
+
+
+def c_distortion(r, p):
+    g = _g(r)
+    return [('js', JS_DIST, [max(0.0, min(50.0, 0.5 * g('boost', 0.0))), 6.0, -6.0, 2.0])] + _out(g('output')), \
+        'approximate (REAPER Distortion)'
+
+
+def c_distroyer(r, p):
+    g = _g(r)
+    return [('js', JS_DIST, [max(0.0, min(50.0, 4.0 * g('drive', 5.0) + g('boost', 3.0))), 6.0, -6.0, 2.0])] \
+        + _out(g('output')), 'approximate (REAPER Distortion)'
+
+
+def c_magneto(r, p):
+    g = _g(r)
+    return [('js', JS_SAT, [max(0.0, min(100.0, g('drive', 20.0)))])] + _out(g('output')), \
+        'approximate (REAPER Saturation)'
+
+
+def c_softclipper(r, p):
+    g = _g(r)
+    return [('js', JS_CLIP, [max(0.0, min(9.0, g('input', 0.0))), max(-3.0, min(1.0, g('output', 0.0)))])], \
+        'close (REAPER Soft Clipper)'
+
+
+def c_ampsim(r, p):
+    g = _g(r)
+    return [('js', JS_DIST, [max(0.0, min(50.0, 5.0 * g('drive', 5.0))), 4.0, -6.0, 2.0])] \
+        + _out(4.0 * (g('volume', 5.0) - 5.0)), 'approximate (REAPER Distortion; the amp and cabinet ' \
+        'models are not carried)'
+
+
+CUBASE_TO_REAPER.update({'Distortion': c_distortion, 'Distroyer': c_distroyer, 'Magneto II': c_magneto,
+                         'SoftClipper': c_softclipper, 'AmpSimulator': c_ampsim})
+
+
+def r_dist(sl, tempo):
+    v = list(sl) + [0.0] * 4
+    return 'Distortion', {'boost': max(0.0, min(100.0, 2.0 * v[0])), 'output': 0.0, 'mix': 100.0,
+                          'bypass': 0.0}, 'approximate (Cubase Distortion)'
+
+
+def r_sat(sl, tempo):
+    v = list(sl) + [0.0]
+    return 'Magneto II', {'drive': max(0.0, min(100.0, v[0])), 'saturationOn': 1.0, 'output': 0.0,
+                          'bypass': 0.0}, 'approximate (Cubase Magneto II)'
+
+
+def r_clip(sl, tempo):
+    v = list(sl) + [0.0] * 2
+    return 'SoftClipper', {'input': v[0], 'output': v[1], 'mix': 100.0, 'bypass': 0.0}, \
+        'close (Cubase SoftClipper)'
+
+
+for _p, _f in ((JS_DIST, r_dist), (JS_SAT, r_sat), (JS_CLIP, r_clip)):
+    REAPER_TO_CUBASE['JS:' + _p] = _f
+
+
+# ------------------------------------------- reverb, pitch, space, tools
+def c_shimmer(r, p):
+    g = _g(r)
+    wet, dry = _wetdry(g('mix', 50.0))
+    fb = max(0.0, min(1.0, g('feedback', 50.0) / 100.0))
+    data = stock.reaverbate(wet_db=_db(wet) + g('outgain', 0.0) if wet > 0 else -150.0,
+                            dry_db=_db(dry) if dry > 0 else None, room=0.6 + 0.35 * fb, damping=0.3,
+                            lowpass=g('highcut', 10000.0), hipass=g('lowcut', 100.0))
+    return [('vst', 'ReaVerbate', data)], 'approximate (ReaVerbate; the shimmer\'s pitch is not carried)'
+
+
+def c_pitchshifter(r, p):
+    g = _g(r)
+    m = max(0.0, min(1.0, g('mix', 100.0) / 100.0))
+    data = stock.reapitch([(max(-24.0, min(24.0, g('pitchshift', 0.0))), m * db2lin(g('outgain', 0.0)))],
+                          dry=(1.0 - m) * db2lin(g('outgain', 0.0)))
+    return [('vst', 'ReaPitch', data)], 'close (ReaPitch)'
+
+
+def c_imager(r, p):
+    """Imager: a width per band - one width for all (their mean), the
+    bands' own levels and pans not carried past the first."""
+    g = _g(r)
+    n = int(g('imgnoBands', 3.0)) + 1
+    ws = [g('imgwidth%d' % k, 100.0) for k in range(1, n + 1) if g('imgbandon%d' % k, 1.0) > 0.5]
+    w = sum(ws) / len(ws) if ws else 100.0
+    return [stock.stereo_width(w)], 'approximate (REAPER stereo width, the bands\' mean %d %%)' % round(w)
+
+
+CUBASE_TO_REAPER.update({'Shimmer': c_shimmer, 'PitchShifter': c_pitchshifter, 'Imager': c_imager})
+
+
+def reapitch_voices(data):
+    """[(semitones, linear volume)], dry of a ReaPitch block."""
+    if not data or len(data) < 32:
+        return [], 1.0
+    n, size = struct.unpack_from('<II', data, 8)
+    dry = _f32(data, 28)
+    out = []
+    for k in range(n):
+        o = 32 + k * size
+        if o + 44 > len(data):
+            break
+        t = [_f32(data, o + 4 * j) for j in range(11)]
+        if t[1] >= 0.5:
+            out.append((-24.0 + 48.0 * t[2], t[9]))
+    return out, dry
+
+
+def r_reapitch(data, tempo):
+    """ReaPitch -> Cubase: octaves below are Octaver (stock.to_cubase);
+    any other one voice PitchShifter."""
+    got = stock.to_cubase('ReaPitch', data, tempo)
+    if got:
+        return got
+    voices, dry = reapitch_voices(data)
+    if len(voices) != 1:
+        return None
+    semis, vol = voices[0]
+    tot = vol + dry
+    return 'PitchShifter', {'pitchshift': semis, 'mix': 100.0 * vol / tot if tot > 1e-9 else 100.0,
+                            'outgain': _db(tot) if tot > 1e-9 else 0.0, 'bypass': 0.0}, \
+        'close (Cubase PitchShifter)'
+
+
+REAPER_TO_CUBASE['ReaPitch'] = r_reapitch
+
+# Meters and tuners make no sound: they are left out with a note
+METERS_CUBASE = ('SuperVision', 'Tuner', 'TestGenerator')
+METERS_LIVE = ('SpectrumAnalyzer', 'Spectrum', 'Tuner')
+
+
 # --------------------------------------------------------- the hooks
 def js_sliders(fx):
     """A JS effect's slider values, from the block the REAPER reader kept."""

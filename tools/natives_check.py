@@ -27,6 +27,23 @@ L = stock.db2lin
 
 # family -> [(case name, 'cubase', effect name, records) | (name, 'reaper', [entries])]
 CASES = {
+    'other': [
+        ('c_shimmer', 'cubase', 'Shimmer', {'mix': 40.0, 'feedback': 60.0}),
+        ('c_pitch', 'cubase', 'PitchShifter', {'pitchshift': 5.0, 'mix': 70.0}),
+        ('c_imager', 'cubase', 'Imager', {'imgwidth1': 80.0, 'imgwidth2': 120.0, 'imgwidth3': 140.0}),
+        ('c_envshaper', 'cubase', 'EnvelopeShaper', {'attackgain': 6.0}),
+        ('r_pitch', 'reaper', [('vst', 'ReaPitch', stock.reapitch([(7.0, 0.6)], dry=0.4))]),
+        ('r_trans', 'reaper', [('js', 'loser/TransientController', [40.0, 0.0, 0.0])]),
+    ],
+    'distortion': [
+        ('c_dist', 'cubase', 'Distortion', {'boost': 40.0, 'output': -3.0}),
+        ('c_magneto', 'cubase', 'Magneto II', {'drive': 35.0}),
+        ('c_softclip', 'cubase', 'SoftClipper', {'input': 4.0, 'output': -0.5}),
+        ('r_dist', 'reaper', [('js', 'guitar/distortion', [24.0, 6.0, -6.0, 2.0])]),
+        ('r_sat', 'reaper', [('js', 'loser/Saturation', [40.0])]),
+        ('r_clip', 'reaper', [('js', 'schwa/soft_clipper', [3.0, -1.0])]),
+        ('r_bits', 'reaper', [('js', 'utility/dither_psycho', [8.0, 0.0, 0.0, 2.0])]),
+    ],
     'modulation': [
         ('c_chorus', 'cubase', 'Chorus', {'rate': 0.8, 'temposync': 0.0, 'width': 30.0, 'mix': 40.0}),
         ('c_flanger', 'cubase', 'Flanger', {'rate': 0.5, 'temposync': 0.0, 'feedback': 40.0, 'mix': 50.0}),

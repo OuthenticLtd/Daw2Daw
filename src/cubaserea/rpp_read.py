@@ -506,8 +506,8 @@ def finish_fx(t, p, log):
         if not fx.native or fx.offline:
             continue
         nm = fx.name or ''
-        if nm == 'ReaXcomp':
-            key, payload = 'ReaXcomp', getattr(fx, 'raw_state', None) or fx.component
+        if nm in ('ReaXcomp', 'ReaPitch'):
+            key, payload = nm, getattr(fx, 'raw_state', None) or fx.component
         elif nm.startswith('JS: '):
             key, payload = 'JS:' + nm[4:].strip(), natives.js_sliders(fx)
         else:
@@ -516,8 +516,8 @@ def finish_fx(t, p, log):
         if not got:
             continue
         uid, st, cname, how = got
-        if key == 'ReaXcomp':
-            fx.reaper_stock = ('ReaXcomp', payload)
+        if key in ('ReaXcomp', 'ReaPitch'):
+            fx.reaper_stock = (key, payload)
         else:
             fx.reaper_js = (key[3:], payload)
         log.append('%r: %s -> %s' % (t.name, nm, how))
