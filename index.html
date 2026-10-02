@@ -445,7 +445,7 @@
         <li><b>Not sample-identical:</b> pitch-shifted or stretched clips and the "close" effects use each DAW's own algorithms - they sound alike and match in level, but do not cancel exactly. Synths with random elements never repeat exactly, even in their own DAW</li>
         <li><b>Live limits:</b> one clip at a time per track (overlaps go on a copy track), fader up to +6 dB (the rest goes on a Utility)</li>
         <li><b>Fade curves in Live</b> are all S-shaped, so a REAPER or Cubase curve becomes the nearest Live curve (and comes back as it was)</li>
-        <li><b>REAPER project offset</b> (a timeline starting before bar 1) is not carried to Cubase - synths that follow the song position (tempo-synced LFOs, arps) can sound slightly different</li>
+        <li><b>REAPER project offset</b> (a timeline starting before bar 1) is not carried to Cubase, where the project plays the same without it (measured); a project taken REAPER &rarr; Cubase &rarr; REAPER comes back without it, so synths that follow the song position can sound slightly different there</li>
         <li><b>Colours</b> are matched to the nearest one where a DAW has a fixed palette (Cubase's project colours, Live's 70 clip colours)</li>
       </ul>
     </div>
@@ -526,7 +526,7 @@ function addLog(t) {
   UI.fromLog(logText);
 }
 
-const worker = new Worker('worker.js?v=653596f526');
+const worker = new Worker('worker.js?v=9d23940c3a');
 worker.onmessage = (e) => {
   const m = e.data;
   if (m.type === 'status') setStatus(m.text);

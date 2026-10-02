@@ -632,7 +632,10 @@ class CprReader:
         p.earliest_event = (min(starts) - max(pre, 0.0)) if starts else 0.0
         if pre <= 1e-9:
             return
-        if os.environ.get('CPR_ON_PROJOFFS'):
+        keep = not os.environ.get('CPR_NO_PROJOFFS') and (
+            os.environ.get('CPR_ON_PROJOFFS') or not getattr(p, 'ara_docs', None))
+        if keep:
+            # (left out with Melodyne in the project, as rpp_read does)
             # REAPER has the same thing: a project offset (PROJOFFS), its
             # timeline starting before bar 1. So nothing moves and nothing
             # in the pre-roll is lost; rpp_write writes the offset

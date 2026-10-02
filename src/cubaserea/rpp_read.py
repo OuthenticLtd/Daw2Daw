@@ -586,16 +586,14 @@ def read(path, log=None, _depth=0, printer=None, index=None):
     if pl:
         p.panlaw = _f(pl[0], 1.0)
     # the project offset (timeline starting before bar 1, a count-in): it
-    # moves no audio, but bar numbers and the musical time ARA plug-ins are
-    # given count from it - Melodyne put edited notes a sample apart with
-    # and without it (2026-10-01) - so it goes to Cubase's Project Setup >
-    # Start, which is the same thing
-    # Opt-in (CPR_ON_PROJOFFS=1): Cubase's Melodyne rendered a REAPER
-    # document with Start at -8 s further from REAPER's render (kaval -52 ->
-    # -24 dB null) than with Start 0, so by default the offset stays behind
+    # moves no audio, only where bar 1 sits.
+    # Not carried to Cubase's Project Setup > Start by default: measured,
+    # Cubase at Start 0 plays what REAPER plays with the offset - Melodyne
+    # (kaval: -52 dB null at Start 0, -24 at -8 s) and synths that follow
+    # the song position (ZITRO's Hive arp: +0.01 dB at Start 0, -0.83 at
+    # -8 s, 2026-10-02). CPR_ON_PROJOFFS=1 carries it anyway
     po = pr.get('PROJOFFS')
-    if po and os.environ.get('CPR_ON_PROJOFFS'):
-        p.start = _f(po[0], 0.0)
+    projoffs = _f(po[0], 0.0) if po else 0.0
     pm = pr.get('PANMODE')
     if pm:
         p.panmode = _i(pm[0], 3)
@@ -764,6 +762,8 @@ def read(path, log=None, _depth=0, printer=None, index=None):
     note_clap(p, log)
     note_empty(p, log)
     read_ara(p, pr, log)
+    if abs(projoffs) > 1e-9 and os.environ.get('CPR_ON_PROJOFFS'):
+        p.start = projoffs
     if printer is not None:
         printer(p, root, path, log)
     if not os.environ.get('CPR_NO_REHOST'):
