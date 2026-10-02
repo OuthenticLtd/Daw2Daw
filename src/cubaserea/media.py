@@ -458,11 +458,21 @@ def locate(path, roots):
                           and dp.count(os.sep) - depth0 < 6]
                 for f in fns:
                     idx.setdefault(f.lower(), os.path.join(dp, f))
+                    # the same name with any non-ASCII character as one
+                    # wildcard: a name carried through a zip or another
+                    # system's code page ('Russ � Deep' for 'Russ - Deep',
+                    # SUPERKUR's ElevenLabs takes) still finds its file
+                    idx.setdefault(('~', _loose(f)), os.path.join(dp, f))
             _found[os.path.normcase(root)] = idx
-        hit = idx.get(key)
+        hit = idx.get(key) or idx.get(('~', _loose(name)))
         if hit:
             return hit
     return None
+
+
+def _loose(name):
+    import re as _re
+    return _re.sub(r'[^ -~]+', '?', name.lower())
 
 
 def relink(project, out_path, log, items=None):
