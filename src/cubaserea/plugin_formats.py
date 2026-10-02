@@ -458,3 +458,69 @@ def apply(project, mode, log):
             done = False
         n += bool(done)
     return n
+
+
+# ------------------------------------------------- what this Live loads
+def live_plugins():
+    """(VST3 class ids, VST2 ids) Live's plug-in database on this machine
+    lists as loaded - a plug-in whose scan failed is not among them (Pro-C
+    2's VST3 on the development PC: scanstate 3, no entry). None where no
+    Live is installed (the browser)."""
+    import glob
+    import sqlite3
+    import shutil
+    import tempfile
+    d = os.path.expandvars(r'%LOCALAPPDATA%\Ableton\Live Database')
+    dbs = sorted(glob.glob(os.path.join(d, 'Live-files-*.db')))
+    if not dbs:
+        return None
+    tmp = tempfile.mkdtemp()
+    try:
+        for ext in ('', '-wal', '-shm'):
+            if os.path.exists(dbs[-1] + ext):
+                shutil.copy(dbs[-1] + ext, os.path.join(tmp, 'l.db' + ext))
+        c = sqlite3.connect(os.path.join(tmp, 'l.db'))
+        rows = c.execute('select dev_identifier from plugins where enabled = 1').fetchall()
+        c.close()
+    except Exception:
+        return None
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    v3, v2 = set(), set()
+    for (ident,) in rows:
+        ident = ident or ''
+        if ident.startswith('device:vst3:'):
+            v3.add(ident.split(':')[-1].split('?')[0].replace('-', '').upper())
+        elif ident.startswith('device:vst:'):
+            try:
+                v2.add(int(ident.split(':')[-1].split('?')[0]) & 0xFFFFFFFF)
+            except ValueError:
+                pass
+    return v3, v2
+
+
+def fit_to_live(project, log):
+    """A plug-in Live on this machine cannot load in the build the project
+    names, but can in the other: turned into that build, settings
+    carried."""
+    got = live_plugins()
+    if not got:
+        return 0
+    v3, v2 = got
+    n = 0
+    for fx in chains(project):
+        if getattr(fx, 'native', False) or not fx.uid:
+            continue
+        e = entry_for(fx)
+        if not e:
+            continue
+        num = struct.unpack('>I', e['vst2']['id'].encode('latin1'))[0]
+        if is_vst2(fx):
+            if num not in v2 and e['vst3']['uid'].upper() in v3 and to_vst3(fx):
+                n += 1
+                log.append('%r: Live here has only its VST3 build - that one, settings carried' % fx.name)
+        else:
+            if fx.uid.upper() not in v3 and num in v2 and to_vst2(fx):
+                n += 1
+                log.append('%r: Live here has only its VST2 build - that one, settings carried' % fx.name)
+    return n

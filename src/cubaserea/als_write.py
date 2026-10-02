@@ -259,6 +259,7 @@ def spill_overlaps(project, log):
             a.items = [i for kk, i in placed if kk == k]
             # the copy plays the same track's audio: same chain, same sends
             a.sends = list(t.sends)
+            a.live_takes = None          # the takes stay on the track itself
             out.append(a)
             n += 1
         log.append('%r: items overlap and REAPER plays them all; a Live track '
@@ -744,6 +745,9 @@ def prepare(p, path, log):
             log.append('%d compressed file(s) (MP3/AAC) decoded to WAV the way REAPER '
                        'plays them, for Live to play the same samples' % len(done))
     model.expand_loops(p, log, dur)
+    from . import plugin_formats
+    plugin_formats.fit_to_live(p, log)
+    stash_takes(p, log)
     if getattr(p, 'pan_law_of', None) == 'cubase':
         model.flatten_project_lanes(p, log)
     else:
@@ -752,6 +756,74 @@ def prepare(p, path, log):
     print_last_resort(p, path, log)
     spill_overlaps(p, log)
     item_curves_to_track(p, log)
+
+
+def cut_from(it, src):
+    """Whether item `it` is a piece of item `src`: the same file, lined up
+    the same way at the same rate, inside its span."""
+    if it is src:
+        return True
+    if src.kind != 'audio' or it.kind != 'audio' or src.file != it.file:
+        return False
+    if abs((src.playrate or 1.0) - (it.playrate or 1.0)) > 1e-9:
+        return False
+    if abs((src.pos - (src.soffs or 0.0)) - (it.pos - (it.soffs or 0.0))) > 1e-4:
+        return False
+    return it.pos >= src.pos - 1e-4 and it.pos + it.length <= src.pos + src.length + 1e-4
+
+
+def stash_takes(p, log):
+    """Live 11's take lanes for what a track has besides what it plays:
+    every REAPER fixed lane and Cubase track version a lane of its own
+    (named after it), and the takes of a multi-take item that do not play
+    one lane per take. Their clips sit on the take lanes, which do not
+    sound in Live; the main lane plays what the source played (the comp),
+    each of its clips tied to the take it was cut from (TakeId, as Live
+    keeps its own comps - read off a Set comped in Live 11)."""
+    n_tracks = n_lanes = 0
+    for t in p.tracks:
+        if t.is_folder:
+            continue
+        lanes = []
+        names = list(getattr(t, 'lane_names', []) or [])
+        items = [i for i in t.items if i.kind in ('audio', 'midi')]
+        if len(names) > 1:
+            for k, nm in enumerate(names):
+                its = [i for i in items if getattr(i, 'lane', 0) == k and getattr(i, 'take_sel', True)]
+                if its:
+                    lanes.append((nm or 'Lane %d' % (k + 1), its))
+        groups = {}
+        for i in items:
+            if getattr(i, 'take_group', None) is not None:
+                groups.setdefault(getattr(i, 'take_no', 0), []).append(i)
+        if len(groups) > 1:
+            if not lanes:
+                for k in sorted(groups):
+                    lanes.append(('Take %d' % (k + 1), groups[k]))
+            else:
+                # takes of an item on a lane: the takes that do not play
+                # get lanes of their own beside the lanes
+                for k in sorted(groups):
+                    rest = [i for i in groups[k] if not getattr(i, 'take_sel', True)]
+                    if rest:
+                        lanes.append(('Take %d' % (k + 1), rest))
+        if len(names) > 1 and lanes:
+            # a comp lane (REAPER 7 comping): every piece the lane that plays
+            # holds was cut from another lane - Live keeps only the takes,
+            # the comp being the main lane
+            act = getattr(t, 'active_lane', 0) or 0
+            playing = [i for i in items if getattr(i, 'lane', 0) == act and getattr(i, 'take_sel', True)]
+            others = [i for i in items if getattr(i, 'lane', 0) != act]
+            if playing and others and all(any(cut_from(i, o) for o in others) for i in playing):
+                act_name = names[act] if act < len(names) else None
+                lanes = [(nm, its) for nm, its in lanes if not (nm == act_name and its == playing)]
+        if len(lanes) >= 1 and (len(lanes) > 1 or len(groups) > 1 or len(names) > 1):
+            t.live_takes = lanes
+            n_tracks += 1
+            n_lanes += len(lanes)
+    if n_tracks:
+        log.append('%d track(s) carry %d take lane(s) in Live: their lanes, versions and takes, '
+                   'with what played comped on the main lane' % (n_tracks, n_lanes))
 
 
 # --------------------------------------------------------------- writer
@@ -1431,17 +1503,21 @@ class Writer:
                           for s_, v in panenv], len(envs))
             self.write_sends(t, mixer, envs, self.return_pos.get(i))
             soloed += 1 if t.solo else 0
+            take_clips = self.take_lanes(tr, t, color)
             if tag == 'AudioTrack':
                 evs = dc.find('MainSequencer/Sample/ArrangerAutomation/Events')
                 for it in t.items:
                     c = self.audio_clip(it, color)
                     if c is not None:
+                        self.link_take(c, it, take_clips)
                         evs.append(c)
             elif tag == 'MidiTrack':
                 evs = dc.find('MainSequencer/ClipTimeable/ArrangerAutomation/Events')
                 for it in t.items:
                     if it.kind == 'midi':
-                        evs.append(self.midi_clip(it, color))
+                        c = self.midi_clip(it, color)
+                        self.link_take(c, it, take_clips)
+                        evs.append(c)
                         ccs += len(it.ccs or ())
             self.tracks.append(tr)
             written[i] = (tr, tid)
@@ -1523,6 +1599,54 @@ class Writer:
         setv(c, 'Disabled', 'true' if it.mute else 'false')
         setv(c, 'Loop/LoopOn', 'false')
         setv(c, 'Loop/StartRelative', '0')
+
+    def take_lanes(self, tr, t, color):
+        """Write the track's take lanes (stash_takes); returns
+        [(item, TakeId)] for tying the main lane's clips to them."""
+        lanes = getattr(t, 'live_takes', None)
+        holder = tr.find('TakeLanes/TakeLanes')
+        if not lanes or holder is None:
+            return []
+        out = []
+        for k, (name, items) in enumerate(lanes):
+            lane = ET.SubElement(holder, 'TakeLane', Id=str(k))
+            ET.SubElement(lane, 'Height', Value='51')
+            ET.SubElement(lane, 'IsContentSelectedInDocument', Value='false')
+            ca = ET.SubElement(lane, 'ClipAutomation')
+            evs = ET.SubElement(ca, 'Events')
+            for it in items:
+                c = self.audio_clip(it, color) if it.kind == 'audio' else self.midi_clip(it, color)
+                if c is None:
+                    continue
+                tid = self.next_take()
+                setv(c, 'TakeId', str(tid))
+                evs.append(c)
+                out.append((it, tid))
+            tv = ET.SubElement(ca, 'AutomationTransformViewState')
+            ET.SubElement(tv, 'IsTransformPending', Value='false')
+            ET.SubElement(tv, 'TimeAndValueTransforms')
+            ET.SubElement(lane, 'Name', Value=name)
+            ET.SubElement(lane, 'Annotation', Value='')
+            ET.SubElement(lane, 'Audition', Value='false')
+        self.stats['take_lanes'] = self.stats.get('take_lanes', 0) + len(lanes)
+        return out
+
+    def next_take(self):
+        self._take = getattr(self, '_take', 100) + 1
+        return self._take
+
+    @staticmethod
+    def link_take(c, it, take_clips):
+        """A main-lane clip cut from one of the takes carries that take's
+        TakeId (cut_from)."""
+        for src, tid in take_clips:
+            if src is it:
+                setv(c, 'TakeId', str(tid))
+                return
+        for src, tid in take_clips:
+            if cut_from(it, src):
+                setv(c, 'TakeId', str(tid))
+                return
 
     def audio_clip(self, it, color):
         if it.kind != 'audio':

@@ -279,6 +279,7 @@ class Reader:
             elif tr.tag == 'MidiTrack':
                 for c in dc.find('MainSequencer/ClipTimeable/ArrangerAutomation/Events'):
                     t.items.append(self.midi_clip(c))
+            self.take_lanes(tr, t)
             index[tr.get('Id')] = len(p.tracks)
             t.live_sends = [(_v(h, 'Send/Manual', 0.0), _v(h, 'Active', True, bool))
                             for h in dc.find('Mixer/Sends')]
@@ -453,6 +454,30 @@ class Reader:
             if cand and os.path.isfile(cand):
                 return os.path.normpath(cand)
         return os.path.normpath(os.path.join(self.dir, rel)) if rel else path
+
+    def take_lanes(self, tr, t):
+        """Live 11's take lanes: the main lane (the comp) is the lane that
+        plays, 'Comp', and each take lane a lane after it with its clips -
+        REAPER's fixed lanes, Cubase's track versions."""
+        lanes = tr.findall('TakeLanes/TakeLanes/TakeLane')
+        if not lanes:
+            return
+        names, extra = ['Comp'], []
+        for k, ln in enumerate(lanes):
+            names.append(_v(ln, 'Name', '', str) or 'Take %d' % (k + 1))
+            for c in ln.findall('ClipAutomation/Events/*'):
+                it = self.audio_clip(c) if c.tag == 'AudioClip' else                     (self.midi_clip(c) if c.tag == 'MidiClip' else None)
+                if it is not None:
+                    it.lane = k + 1
+                    extra.append(it)
+        for it in t.items:
+            it.lane = 0
+        t.items.extend(extra)
+        t.lane_names = names
+        t.active_lane = 0
+        t.lanes_playing = 1
+        self.log.append('%r: %d take lane(s) from Live, the comp playing as lane %r'
+                        % (t.name, len(lanes), names[0]))
 
     def audio_clip(self, c):
         it = Item()
