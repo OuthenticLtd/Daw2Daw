@@ -501,32 +501,62 @@ def split_instruments(project, log=None):
     moved = {}
     n_split = 0
     for old_i, t in enumerate(project.tracks):
-        moved[old_i] = len(out)
-        out.append(t)
         extra = [f for f in t.fx if getattr(f, 'is_instrument', False)]
         if t.is_folder or t.instrument is None or not extra:
+            moved[old_i] = len(out)
+            out.append(t)
             continue
-        t.fx = [f for f in t.fx if not getattr(f, 'is_instrument', False)]
-        for k, inst in enumerate(extra):
+        # REAPER plays the chain in series: each instrument adds its sound
+        # to what reaches it, and the effects after the last one process
+        # the sum. In Cubase: a folder whose group channel carries those
+        # effects, the track's level, pan and sends, and one instrument
+        # track per instrument inside it, each with the effects that sat
+        # between it and the next instrument, at unity
+        chain = list(t.fx)
+        last = max(k for k, f in enumerate(chain) if getattr(f, 'is_instrument', False))
+        post = chain[last + 1:]
+        segs, cur, insts = [], [], [t.instrument]
+        for f in chain[:last + 1]:
+            if getattr(f, 'is_instrument', False):
+                segs.append(cur)
+                cur = []
+                insts.append(f)
+            else:
+                cur.append(f)
+        segs.append(cur)                 # the last instrument has none before the post chain
+        g = copy.copy(t)
+        g.is_folder = True
+        g.items = []
+        g.instrument = None
+        g.fx = post
+        g.name = t.name
+        g.kind = 'other'
+        moved[old_i] = len(out)
+        out.append(g)
+        midi = [i for i in t.items if i.kind == 'midi']
+        for k, inst in enumerate(insts):
             a = copy.copy(t)
-            a.name = '%s (%s %d)' % (t.name, inst.name or 'instrument', k + 2)
+            a.is_folder = False
+            a.depth = t.depth + 1
+            a.name = t.name if k == 0 else '%s (%s %d)' % (t.name, inst.name or 'instrument', k + 1)
             a.instrument = inst
-            a.fx = []
+            a.fx = segs[k]
             a.sends = []
-            a.volenv = []
-            a.panenv = []
-            a.items = [copy.copy(i) for i in t.items if i.kind == 'midi']
+            a.vol, a.pan = 1.0, 0.0
+            a.volenv, a.panenv = [], []
+            a.volenv_idle, a.panenv_idle = [], []
+            a.mute = 0
+            a.bus_id = None
+            a.out_bus_id = None
+            a.items = list(t.items) if k == 0 else [copy.copy(i) for i in midi]
             out.append(a)
-            n_split += 1
+        g.name = t.name + ' (layers)'
+        n_split += len(insts) - 1
         if log is not None:
-            log.append('%r has %d instruments in its chain; Cubase holds one '
-                       'per track, so %s got a track each below it with the '
-                       'same MIDI parts%s'
-                       % (t.name, len(extra) + 1,
-                          ', '.join(f.name or 'instrument' for f in extra),
-                          ' - the %d insert effect(s) stay on the first '
-                          'track and no longer process the layered sum'
-                          % len(t.fx) if t.fx else ''))
+            log.append('%r has %d instruments in its chain; Cubase holds one per track, so each '
+                       'got a track inside the group %r, which carries the effects after them '
+                       '(%s), the level and the sends - the sum is processed as in REAPER'
+                       % (t.name, len(insts), g.name, ', '.join(f.name for f in post) or 'none'))
     if n_split:
         project.tracks = out
         _repoint_sends(project, moved)
