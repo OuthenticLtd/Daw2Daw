@@ -313,6 +313,9 @@ def convert(a, out, bar):
         n = plugin_formats.apply(p, fmt, log)
         if n:
             log.append('%d plug-in(s) turned into their %s build' % (n, fmt.upper()))
+    if os.path.splitext(out)[1].lower() == '.rpp' and fmt != 'vst2':
+        from cubaserea import plugin_formats
+        plugin_formats.for_reaper(p, log)
     if a.no_fx:
         for t in p.tracks:
             t.fx = []

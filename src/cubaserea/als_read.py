@@ -54,6 +54,28 @@ def _v(e, path, default=None, conv=float):
         return default
 
 
+_SHAPE_CURVES = None
+
+
+def reaper_shape_of(sk, sl, key):
+    """The REAPER fade shape (0..7 at curve 0) whose Live curve, as
+    als_write fits it, is exactly (skew, slope); else None."""
+    global _SHAPE_CURVES
+    if _SHAPE_CURVES is None:
+        from .als_write import fit_fade
+        from . import fades
+        xs = [k / 20.0 for k in range(21)]
+        _SHAPE_CURVES = {}
+        for shape in range(8):
+            for kk, f in (('in', fades.fadein_gain), ('out', fades.fadeout_gain)):
+                try:
+                    a, b, _e = fit_fade([f(shape, 0.0, x) for x in xs], kk)
+                except Exception:
+                    continue
+                _SHAPE_CURVES.setdefault((kk, round(a, 3), round(b, 3)), shape)
+    return _SHAPE_CURVES.get((key, round(sk, 3), round(sl, 3)))
+
+
 def rgb_of(index):
     try:
         c = PALETTE[int(index) % len(PALETTE)]
@@ -518,6 +540,28 @@ class Reader:
             it.pitch = _v(c, 'PitchCoarse', 0.0) + _v(c, 'PitchFine', 0.0) / 100.0
             it.fadein = self.sec(b0 + fin) - it.pos if fin else 0.0
             it.fadeout = it.pos + it.length - self.sec(b1 - fout) if fout else 0.0
+        # the fades' curves (skew, slope) as points along each fade, the way
+        # a Cubase fade arrives: REAPER gets the nearest shape and Cubase the
+        # points. Read as straight, Cherry's short stingers (REAPER shape 1
+        # there and back) came back up to 3 dB quieter
+        if fades is not None:
+            from .als_write import _live_curve
+            pts = {}
+            for key, tag, secs in (('in', 'FadeIn', it.fadein), ('out', 'FadeOut', it.fadeout)):
+                sk, sl = _v(fades, tag + 'CurveSkew', 0.0), _v(fades, tag + 'CurveSlope', 0.0)
+                if not (secs and secs > 1e-4 and (abs(sk) > 1e-6 or abs(sl) > 1e-6)):
+                    continue
+                shape = reaper_shape_of(sk, sl, key)
+                if shape is not None:
+                    # exactly the curve als_write gives this REAPER shape:
+                    # the shape itself, so it goes back as it was
+                    it.fade_lines['FADEIN' if key == 'in' else 'FADEOUT'] = \
+                        [str(shape), '%.10g' % secs, '0', '1', '0', '0', '0']
+                    continue
+                gains = _live_curve(sk, sl, key)
+                pts[key] = [(k / 20.0, g) for k, g in enumerate(gains)]
+            if pts:
+                it.fade_points = pts
         if getattr(it, 'file', '') and os.path.splitext(it.file)[1].lower() in ('.mp4', '.mov', '.m4v'):
             it.kind = 'video'
         return it

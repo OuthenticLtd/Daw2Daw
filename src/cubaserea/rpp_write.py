@@ -114,6 +114,13 @@ def fade_line(item, key, stats=None, log=None, track=''):
     import math
     from . import fades
     secs = item.fadein if key == 'in' else item.fadeout
+    toks = (getattr(item, 'fade_lines', None) or {}).get('FADEIN' if key == 'in' else 'FADEOUT')
+    if toks and secs > 0:
+        # a REAPER shape known for the fade (als_read: Live's curve is the
+        # one this shape becomes): written as that shape
+        from .rpp_read import fade_shape
+        shape, curve = fade_shape(toks)
+        return '%d %s 0 1 0 %s 0' % (shape, fmt(secs), fmt(curve))
     pts = (getattr(item, 'fade_points', None) or {}).get(key)
     if not pts or len(pts) <= 2 or secs <= 0:
         return '0 %s 0 1 0 0 0' % fmt(secs)

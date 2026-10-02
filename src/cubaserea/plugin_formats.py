@@ -435,6 +435,30 @@ def for_cubase(project, log):
     return n
 
 
+def for_reaper(project, log):
+    """A VST2 that arrives as a bare parameter list (Live keeps FabFilter's
+    VST2 so) while the plug-in itself saves a chunk: REAPER would hand the
+    list to it as a chunk, which it cannot read, and it loads at its
+    defaults (Black Seven back from Live: the master's Pro-L 2 and the bass
+    bus' Pro-C 2 reset, the master 14 dB down). Its VST3 build is made
+    from the parameters instead (the catalog's recipe). Returns how many."""
+    n = 0
+    for fx in chains(project):
+        if getattr(fx, 'native', False) or not is_vst2(fx):
+            continue
+        e = entry_for(fx)
+        if e is None or e['recipe'] not in ('params', 'ffbs'):
+            continue
+        kind, _data = vst2_parts(fx)
+        if kind != 'params':
+            continue
+        try:
+            n += bool(to_vst3(fx, log))
+        except Exception as ex:          # a state not as the recipe expects
+            log.append('%r: kept as it was (%s)' % (fx.name, ex))
+    return n
+
+
 def chains(project):
     """Every plug-in of the project: instruments, inserts, the master's."""
     for t in getattr(project, 'tracks', []):

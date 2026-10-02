@@ -274,7 +274,7 @@ def folder_files(folder):
     # 'X (audio)' (Cubase, MIDI and audio apart), 'X (overlap N)' (Live,
     # clips that overlap), 'X (<instrument> N)' (Cubase, layered synths)
     def base_of(k):
-        m = re.match(r'^(.*) \((?:audio|overlap \d+|[^()]+ \d+)\)$', k)
+        m = re.match(r'^(.*) \((?:audio|overlap \d+|[^()]+ \d+|[^()]+ pan)\)$', k)
         return m.group(1) if m and m.group(1) in plain else None
     extra = {}
     for k in plain:
@@ -283,7 +283,12 @@ def folder_files(folder):
             extra.setdefault(b0, []).extend(plain[k])
     out = {}
     for k, fs in plain.items():
-        if base_of(k) is not None:
+        if base_of(k) is not None or (k.endswith(' (layers)') and k[:-9] in plain):
+            continue
+        if k + ' (layers)' in plain:
+            # Cubase's 'X (layers)' group holds X's instruments (one track
+            # each) and what came after them: the group is what X played
+            out[k] = list(plain[k + ' (layers)'])
             continue
         parts = extra.get(k, [])
         for i, f in enumerate(fs):
@@ -489,11 +494,17 @@ def main():
         # stretch both sides cover, which left nothing to differ and read
         # as a perfect null - and then as a silent export
         full_a = rms(a)
+        full_b = rms(b)
 
         def score(o):
-            x, _y = overlap(a, b, o)
+            x, y = overlap(a, b, o)
             kept = rms(x)
-            if kept < 0.3 * full_a:
+            # B's side has to keep its sound too: two stems that cannot
+            # null (another reverb, a stretched clip) leave a residual of
+            # about 1.4 times the signal, and an offset that put B's sound
+            # outside the overlap scored a clean 1.0 and won - read as a
+            # silent B (Banatul's REVERB, Cherry's later clips from Live)
+            if kept < 0.3 * full_a or rms(y) < 0.3 * full_b:
                 return float('inf')
             return residual(a, b, o) / max(kept, 1e-12)
         best = None

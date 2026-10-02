@@ -423,9 +423,9 @@
         <li><b>Tracks:</b> audio, instrument and MIDI tracks, folders and groups, names, colours, mute, solo, track delay</li>
         <li><b>Clip colours:</b> audio and MIDI clip colours in every direction</li>
         <li><b>Mix:</b> volume (past +6 dB too), pan with each DAW's pan law matched, sends and returns, output routing into groups (Live's <i>Audio To</i> becomes a Cubase group)</li>
-        <li><b>Audio clips:</b> position, offset, clip gain, fades, reverse, playback rate, pitch, stretch and warp markers, overlapping clips</li>
+        <li><b>Audio clips:</b> position, offset, clip gain, fades with their curves, reverse, playback rate, pitch, stretch and warp markers, overlapping clips</li>
         <li><b>Comping:</b> REAPER lanes and takes, Cubase track versions and Live take lanes carry across - every take kept, the comp playing (Live: take lanes with the comp on the main lane)</li>
-        <li><b>MIDI:</b> notes, velocities, controllers; several instruments layered on one REAPER track</li>
+        <li><b>MIDI:</b> notes, velocities, controllers; several instruments layered on one REAPER track (Cubase: a track per instrument under a group; Live: an Instrument Rack on the one track)</li>
         <li><b>Automation:</b> volume, pan and plug-in parameters</li>
         <li><b>Arrangement:</b> tempo, time signature, markers, regions (Live: locators)</li>
         <li><b>Built-in effects:</b> each DAW's own effects become the closest built-in effects of the others, settings carried - EQs, compressors, limiters, gates, expanders, de-essers, multiband dynamics, delays, reverbs, chorus, flanger, phaser, tremolo, auto-pan, pitch shift, distortion, saturation, bit reduction, stereo width, gain. Levels are matched by measurement</li>
@@ -444,6 +444,8 @@
         <li><b>Plug-ins must be installed</b> on the machine that opens the converted project. Converting to Live on a computer with Live installed picks the build Live can load there (VST2 or VST3); in the browser, choose the build yourself if a plug-in does not open</li>
         <li><b>Not sample-identical:</b> pitch-shifted or stretched clips and the "close" effects use each DAW's own algorithms - they sound alike and match in level, but do not cancel exactly. Synths with random elements never repeat exactly, even in their own DAW</li>
         <li><b>Live limits:</b> one clip at a time per track (overlaps go on a copy track), fader up to +6 dB (the rest goes on a Utility)</li>
+        <li><b>Fade curves in Live</b> are all S-shaped, so a REAPER or Cubase curve becomes the nearest Live curve (and comes back as it was)</li>
+        <li><b>REAPER project offset</b> (a timeline starting before bar 1) is not carried to Cubase - synths that follow the song position (tempo-synced LFOs, arps) can sound slightly different</li>
         <li><b>Colours</b> are matched to the nearest one where a DAW has a fixed palette (Cubase's project colours, Live's 70 clip colours)</li>
       </ul>
     </div>
@@ -524,7 +526,7 @@ function addLog(t) {
   UI.fromLog(logText);
 }
 
-const worker = new Worker('worker.js?v=1759dcefa8');
+const worker = new Worker('worker.js?v=9b70d5b522');
 worker.onmessage = (e) => {
   const m = e.data;
   if (m.type === 'status') setStatus(m.text);
