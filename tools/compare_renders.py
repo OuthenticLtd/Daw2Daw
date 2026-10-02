@@ -270,14 +270,25 @@ def folder_files(folder):
     for f in names:
         k = re.sub(r'-\d{3}$', '', key_of(f))
         plain.setdefault(k, []).append(f)
+    # the converter's copy tracks sum back into the track they came from:
+    # 'X (audio)' (Cubase, MIDI and audio apart), 'X (overlap N)' (Live,
+    # clips that overlap), 'X (<instrument> N)' (Cubase, layered synths)
+    def base_of(k):
+        m = re.match(r'^(.*) \((?:audio|overlap \d+|[^()]+ \d+)\)$', k)
+        return m.group(1) if m and m.group(1) in plain else None
+    extra = {}
+    for k in plain:
+        b0 = base_of(k)
+        if b0 is not None:
+            extra.setdefault(b0, []).extend(plain[k])
     out = {}
     for k, fs in plain.items():
-        if k.endswith(' (audio)') and k[:-8] in plain:
+        if base_of(k) is not None:
             continue
-        parts = plain.get(k + ' (audio)', [])
+        parts = extra.get(k, [])
         for i, f in enumerate(fs):
             kk = k if len(fs) == 1 else '%s-%03d' % (k, i + 1)
-            out[kk] = [f] + ([parts[i]] if i < len(parts) else [])
+            out[kk] = [f] + (parts if len(fs) == 1 else ([parts[i]] if i < len(parts) else []))
     return out
 
 

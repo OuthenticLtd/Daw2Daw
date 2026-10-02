@@ -1095,9 +1095,67 @@ def c_morphfilter(r, p):
 CUBASE_TO_REAPER['MorphFilter'] = c_morphfilter
 
 # Cubase's own effects with nothing like them elsewhere: left out, said so
+# ------------------------------------- Cubase's VST2-era effects
+# Kept as Steinberg's VST2 wrapper ('VstW' + the bank of normalised
+# parameters); the parameters' names and ranges read from Cubase 15's
+# vintage-plugins.vst3 itself (tools/format_probe.py curves): every one
+# linear from its low to its high value, the lists evenly stepped
+LEGACY_PARAMS = {
+    'Bitcrusher': (('mode', 0, 3), ('depth', 0, 24), ('divider', 1, 65), ('mix', 0, 100), ('output', 0, 100)),
+    'Chopper': (('waveform', 0, 4), ('depth', 0, 100), ('sync', 0, 1), ('speed', 0, 17), ('input', 0, 100),
+                ('output', 0, 100), ('mix', 0, 100), ('mono', 0, 1), ('square', 0, 1)),
+    'DaTube': (('drive', 0, 100), ('mix', 0, 100), ('output', 0, 1), ('vu', 0, 100)),
+}
+
+
+def legacy_values(name, state):
+    from . import plugin_formats
+    got = plugin_formats.unvstw(state or b'')
+    spec = LEGACY_PARAMS.get(name)
+    if not got or 'params' not in got or not spec:
+        return None
+    return {k: lo + (hi - lo) * v for (k, lo, hi), v in zip(spec, got['params'])}
+
+
+def _lvl_pct(pct):
+    """A 0..100 level knob of these effects (their default, 100, is unity),
+    as dB."""
+    return _db(max(1e-6, pct / 100.0))
+
+
+def c_bitcrusher(v, p):
+    bits = max(1.0, min(24.0, round(v['depth'])))
+    note = '' if v['divider'] <= 1.5 else '; its sample-rate division (1/%d) is not carried' % round(v['divider'])
+    wet = v['mix'] / 100.0
+    if wet < 0.999:
+        note += '; its dry/wet mix is not carried'
+    return [('js', JS_BITS, [bits, 0.0, 0.0, 2.0])] + _out(_lvl_pct(v['output'])), \
+        'approximate (REAPER bit reduction%s)' % note
+
+
+def c_chopper(v, p):
+    if v['sync'] > 0.5:
+        q = stock.SYNC_NOTES[max(0, min(17, int(round(v['speed']))))]
+        rate = _tempo(p) / 60.0 / max(q, 1e-3)
+    else:
+        rate = 1.0 + v['speed']
+    depth = max(0.001, min(1.0, v['depth'] / 100.0 * v['mix'] / 100.0))
+    return [('js', JS_TREMOLO, [max(0.0, min(100.0, rate)), max(-60.0, 6.0 * math.log2(depth)),
+                                0.0 if v['mono'] > 0.5 else 1.0])] + _out(_lvl_pct(v['output'])), \
+        "approximate (REAPER Tremolo; the Chopper's square wave is a smooth one here)"
+
+
+def c_datube(v, p):
+    return [('js', JS_SAT, [max(0.0, min(100.0, v['drive']))])] + \
+        _out(_db(max(1e-6, v['output']))), 'approximate (REAPER Saturation)'
+
+
+LEGACY_TO_REAPER = {'Bitcrusher': c_bitcrusher, 'Chopper': c_chopper, 'DaTube': c_datube}
+
+
 UNMATCHED_CUBASE = ('Vocoder', 'VocalChain', 'Pitch Correct', 'FX Modulator', 'Mix6To2', 'MixerDelay',
                     'MIDI Gate', 'ModScripter', 'Step Modulator', 'Grungelizer', 'Metalizer', 'Tranceformer',
-                    'RingModulator', 'Chopper', 'StepFilter', 'Bitcrusher', 'DaTube',
+                    'RingModulator', 'StepFilter',
                     'DualFilter', 'AutoFilter', 'ToneBooster')
 
 
@@ -1123,6 +1181,14 @@ def from_cubase(fx, project=None):
     maps, or None."""
     from . import builtins
     name = builtins.name_of_uid(fx.uid) or fx.name
+    if name in LEGACY_TO_REAPER:
+        v = legacy_values(name, fx.component)
+        if v is None:
+            return None
+        try:
+            return LEGACY_TO_REAPER[name](v, project)
+        except Exception:
+            return None
     fn = CUBASE_TO_REAPER.get(name)
     if fn is None:
         return None

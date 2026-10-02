@@ -76,7 +76,9 @@ How close a mapping is, as the conversion log says it:
 | Distroyer, Quadrafuzz, AmpSimulator, VST Amp Rack, Bass Amp | JS Distortion | Overdrive / Pedal / Amp | approximate |
 | Magneto II | JS Saturation | Saturator / Dynamic Tube / Vinyl | approximate, level matched within 0.05 dB |
 | SoftClipper | JS Soft Clipper | Saturator (soft clip) | close |
-| - | JS bit reduction | Redux (bit depth) | close |
+| Bitcrusher (bit depth) | JS bit reduction | Redux (bit depth) | close / approximate |
+| Chopper | JS Tremolo | Auto Pan | approximate |
+| DaTube | JS Saturation | Saturator | approximate |
 | - | ReaEQ (speaker band) | Cabinet | approximate |
 
 ## Not carried (nothing like them elsewhere)
@@ -84,11 +86,13 @@ How close a mapping is, as the conversion log says it:
 Left out with a note in the log saying so and to render the track in its own
 DAW first:
 
-- **Cubase:** Vocoder, VocalChain, Pitch Correct, FX Modulator, and its
-  legacy VST2-era effects (Bitcrusher, Chopper, DaTube, Grungelizer,
-  Metalizer, RingModulator, StepFilter, Tranceformer), AutoFilter (its cutoff
-  is not in its saved state), DualFilter (not a standard filter shape) and
-  ToneBooster (being measured).
+- **Cubase:** Vocoder, VocalChain, Pitch Correct, FX Modulator, the
+  VST2-era Grungelizer, Metalizer, RingModulator, StepFilter and
+  Tranceformer (their parameters are read - tools/format_probe.py - but
+  nothing elsewhere plays like them), AutoFilter (its cutoff is not in its
+  saved state), DualFilter (not a standard filter shape) and ToneBooster
+  (Cubase's plug-in set loads only inside Cubase, so it cannot be measured
+  outside it).
 - **Live:** Corpus, Resonators, Vocoder, Beat Repeat, Looper, Spectral
   Resonator, Spectral Time, Erosion, Max for Live devices.
 - Meters and tuners (SuperVision, Tuner, Spectrum) make no sound and are
