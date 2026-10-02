@@ -61,9 +61,13 @@ class Block:
 
 
 def parse(path):
+    return parse_lines(open(path, encoding='utf-8', errors='replace'))
+
+
+def parse_lines(lines):
     root = Block('ROOT', [])
     stack = [root]
-    for raw in open(path, encoding='utf-8', errors='replace'):
+    for raw in lines:
         line = raw.rstrip('\r\n')
         s = line.strip()
         if not s:
@@ -383,6 +387,75 @@ def read_fx(chain, log, index=None):
     return out
 
 
+def finish_fx(t, p, log):
+    """What a track's chain becomes beyond REAPER: a ReaEQ last in it is
+    Cubase's channel EQ, REAPER's own effects with a Cubase counterpart are
+    that (keeping the REAPER original as fx.reaper_stock). Also run on the
+    REAPER blocks Live's own devices become (als_read)."""
+    # the channel EQ, if it came across as the converter's JS effect
+    ce = [f for f in t.fx if getattr(f, 'chan_eq_bands', None) is not None]
+    if ce:
+        t.chan_eq = [] if ce[-1].bypass else list(ce[-1].chan_eq_bands)
+        t.fx = [f for f in t.fx if f not in ce]
+    elif t.fx and t.fx[-1].native and (t.fx[-1].name or '').startswith('ReaEQ')                     and not t.fx[-1].offline:
+        # a ReaEQ last in the chain plays where Cubase's channel EQ
+        # does (after the inserts): it becomes that, when its bands
+        # fit Cubase's four
+        from . import chan_eq
+        rb = chan_eq.reaeq_state_bands(getattr(t.fx[-1], 'raw_state', None) or t.fx[-1].component)
+        if rb is not None:
+            # the Cubase bands that play it most closely (both EQs
+            # modelled from renders; up to four bands)
+            bands, worst = chan_eq.fit_reaeq(rb)
+            if bands is None:
+                # more kinds of band than Cubase's four hold (a
+                # shelf and a cut both on top): the closest with one
+                # band less, judged against the whole ReaEQ curve
+                full = chan_eq._total(chan_eq.reaeq_band_db, rb, 48000.0)
+                best = None
+                for k in range(len(rb)):
+                    sub = rb[:k] + rb[k + 1:]
+                    b2, _w = chan_eq.fit_reaeq(sub) if sub else (None, None)
+                    if b2 is None:
+                        continue
+                    got = chan_eq._total(chan_eq.cubase_band_db, b2, 48000.0)
+                    w = max(abs(x - y) for x, y in zip(got, full))
+                    if best is None or w < best[0]:
+                        best = (w, b2)
+                if best is not None:
+                    worst, bands = best
+            if bands is not None:
+                t.chan_eq = [] if t.fx[-1].bypass else bands
+                # ReaEQ's own bands, for a writer with an EQ that
+                # takes them more directly than Cubase's four (Live's
+                # EQ Eight - als_write)
+                t.reaeq_bands = [] if t.fx[-1].bypass else rb
+                t.fx = t.fx[:-1]
+                log.append("%r: its ReaEQ became Cubase's channel EQ (%s), within "
+                           "%.2f dB of ReaEQ's curve%s"
+                           % (t.name, chan_eq.describe(bands), worst,
+                              '' if worst <= 0.5 else ' - more than the 0.5 dB this '
+                              'converter holds itself to: check it by ear'))
+    # REAPER's own plug-ins with a Cubase counterpart become that
+    # one of Cubase's own effects, with the same settings (stock.py)
+    from . import stock
+    for fx in t.fx:
+        if fx.native and (fx.name or '') in ('ReaComp', 'ReaDelay', 'ReaLimit', 'ReaGate', 'ReaVerbate', 'ReaPitch'):
+            data = getattr(fx, 'raw_state', None) or fx.component
+            got = stock.to_cubase(fx.name, data, tempo=(p.tempo[0][1] if p.tempo else 120.0))
+            if got:
+                uid, st, cname, how = got
+                # the REAPER original, for a writer whose own stock
+                # effects map from it rather than from Cubase's
+                # (als_write -> live_stock)
+                fx.reaper_stock = (fx.name, data)
+                log.append('%r: %s -> %s' % (t.name, fx.name, how))
+                fx.uid, fx.component, fx.name = uid, st, cname
+                fx.controller = b''
+                fx.native = False
+                fx.raw_group = None
+
+
 def read(path, log=None, _depth=0, printer=None, index=None):
     """Read a .rpp. `printer`, when given, is called with (project, parsed
     tree, path, log) once the tracks are in - see print_tracks - so tracks
@@ -560,68 +633,7 @@ def read(path, log=None, _depth=0, printer=None, index=None):
         chain = tb.child('FXCHAIN')
         if chain:
             t.fx = read_fx(chain, log, index)
-            # the channel EQ, if it came across as the converter's JS effect
-            ce = [f for f in t.fx if getattr(f, 'chan_eq_bands', None) is not None]
-            if ce:
-                t.chan_eq = [] if ce[-1].bypass else list(ce[-1].chan_eq_bands)
-                t.fx = [f for f in t.fx if f not in ce]
-            elif t.fx and t.fx[-1].native and (t.fx[-1].name or '').startswith('ReaEQ')                     and not t.fx[-1].offline:
-                # a ReaEQ last in the chain plays where Cubase's channel EQ
-                # does (after the inserts): it becomes that, when its bands
-                # fit Cubase's four
-                from . import chan_eq
-                rb = chan_eq.reaeq_state_bands(getattr(t.fx[-1], 'raw_state', None) or t.fx[-1].component)
-                if rb is not None:
-                    # the Cubase bands that play it most closely (both EQs
-                    # modelled from renders; up to four bands)
-                    bands, worst = chan_eq.fit_reaeq(rb)
-                    if bands is None:
-                        # more kinds of band than Cubase's four hold (a
-                        # shelf and a cut both on top): the closest with one
-                        # band less, judged against the whole ReaEQ curve
-                        full = chan_eq._total(chan_eq.reaeq_band_db, rb, 48000.0)
-                        best = None
-                        for k in range(len(rb)):
-                            sub = rb[:k] + rb[k + 1:]
-                            b2, _w = chan_eq.fit_reaeq(sub) if sub else (None, None)
-                            if b2 is None:
-                                continue
-                            got = chan_eq._total(chan_eq.cubase_band_db, b2, 48000.0)
-                            w = max(abs(x - y) for x, y in zip(got, full))
-                            if best is None or w < best[0]:
-                                best = (w, b2)
-                        if best is not None:
-                            worst, bands = best
-                    if bands is not None:
-                        t.chan_eq = [] if t.fx[-1].bypass else bands
-                        # ReaEQ's own bands, for a writer with an EQ that
-                        # takes them more directly than Cubase's four (Live's
-                        # EQ Eight - als_write)
-                        t.reaeq_bands = [] if t.fx[-1].bypass else rb
-                        t.fx = t.fx[:-1]
-                        log.append("%r: its ReaEQ became Cubase's channel EQ (%s), within "
-                                   "%.2f dB of ReaEQ's curve%s"
-                                   % (t.name, chan_eq.describe(bands), worst,
-                                      '' if worst <= 0.5 else ' - more than the 0.5 dB this '
-                                      'converter holds itself to: check it by ear'))
-            # REAPER's own plug-ins with a Cubase counterpart become that
-            # one of Cubase's own effects, with the same settings (stock.py)
-            from . import stock
-            for fx in t.fx:
-                if fx.native and (fx.name or '') in ('ReaComp', 'ReaDelay', 'ReaLimit', 'ReaGate', 'ReaVerbate', 'ReaPitch'):
-                    data = getattr(fx, 'raw_state', None) or fx.component
-                    got = stock.to_cubase(fx.name, data, tempo=(p.tempo[0][1] if p.tempo else 120.0))
-                    if got:
-                        uid, st, cname, how = got
-                        # the REAPER original, for a writer whose own stock
-                        # effects map from it rather than from Cubase's
-                        # (als_write -> live_stock)
-                        fx.reaper_stock = (fx.name, data)
-                        log.append('%r: %s -> %s' % (t.name, fx.name, how))
-                        fx.uid, fx.component, fx.name = uid, st, cname
-                        fx.controller = b''
-                        fx.native = False
-                        fx.raw_group = None
+            finish_fx(t, p, log)
             for k, fx in enumerate(t.fx):
                 if getattr(fx, 'is_instrument', False):
                     t.instrument = t.fx.pop(k)

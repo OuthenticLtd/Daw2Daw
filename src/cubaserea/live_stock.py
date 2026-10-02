@@ -113,11 +113,17 @@ def gate(w, data):
         return None
     v = [_f32(data, 8 + 4 * p) for p in range(15)]
     d = w.stock_device('gate')
+    if v[0] < 0.0099:
+        w.log.append("a ReaGate threshold of %.1f dB is under Live Gate's "
+                     '-40 dB and is set to that' % _db(v[0]))
     _put(d, 'Threshold', v[0])
     _put(d, 'Attack', 500.0 * v[1])
     _put(d, 'Release', 5000.0 * v[2])
     _put(d, 'Hold', 1000.0 * v[4])
-    _put(d, 'Return', -max(-100.0, _db(v[9])) if v[9] else 0.0)
+    # ReaGate's closed level (its Dry) is Live's Floor, the record's Gain
+    # (-75..0 dB); Live's Return is a hysteresis, which ReaGate has none of
+    _put(d, 'Gain', max(-75.0, _db(v[9])) if v[9] else -75.0)
+    _put(d, 'Return', 0.0)
     return d, 'close (Live Gate)'
 
 
@@ -182,7 +188,16 @@ def delay(w, data, tempo=120.0):
     _put(d, 'Modulation_AmountFilter', 0.0)
     vol = (a[9] or 1.0) * (wet or 0.0)
     dry = dry or 0.0
-    _put(d, 'DryWet', 1.0 if dry <= 1e-6 else vol / (vol + dry))
+    # ReaDelay sets its echoes and the dry each at a level; Live's Dry/Wet
+    # crossfades the two. The blend is Dry/Wet, the overall level a Utility
+    # after it (as for the Reverb): G ((1 - x) dry + x wet) with G = dry + vol
+    G = vol + dry
+    if G <= 1e-9:
+        _put(d, 'DryWet', 1.0)
+        return d, 'close (Live Delay, silent: ReaDelay at no level)'
+    _put(d, 'DryWet', vol / G)
+    if abs(G - 1.0) > 1e-6:
+        return [(d, 'close (Live Delay)'), (w.gain_device(G), 'the level ReaDelay plays at')]
     return d, 'close (Live Delay)'
 
 
@@ -366,8 +381,10 @@ def chorus(w, rec):
     g = lambda k, d0=0.0: rec[k][1] if k in rec else d0
     d = w.stock_device('chorus')
     _set(d, 'Mode', 0)
-    _put(d, 'Rate', g('rate', 1.0))
-    _put(d, 'Amount', g('depth', 50.0) / 100.0)
+    # Cubase's Chorus keeps its depth as 'width' (%), its stereo spread as
+    # 'spatial' (%); a tempo-synced rate is a note value, read as 1 Hz
+    _put(d, 'Rate', 1.0 if g('temposync') >= 0.5 else g('rate', 1.0))
+    _put(d, 'Amount', g('width', 50.0) / 100.0)
     _put(d, 'Feedback', 0.0)
     _put(d, 'Width', g('spatial', 100.0) / 100.0)
     _put(d, 'DryWet', g('mix', 50.0) / 100.0)
@@ -379,7 +396,15 @@ def wahwah(w, rec):
     """Cubase WahWah -> Auto Filter, a band-pass at the pedal's position."""
     g = lambda k, d0=0.0: rec[k][1] if k in rec else d0
     d = w.stock_device('autofilter')
-    _put(d, 'Resonance', 0.6)
+    # the pedal (0..100) sweeps the band from freqlow to freqhigh,
+    # geometrically, its Q from qlow to qhigh likewise
+    x = max(0.0, min(1.0, g('pedal', 50.0) / 100.0))
+    lo, hi = max(20.0, g('freqlow', 500.0)), max(20.0, g('freqhigh', 2000.0))
+    hz = lo * (hi / lo) ** x
+    q = max(1.0, g('qlow', 50.0) * (1 - x) + g('qhigh', 50.0) * x) / 10.0
+    _set(d, 'FilterType', 2)                      # band-pass
+    _put(d, 'Cutoff', 69.0 + 12.0 * math.log2(hz / 440.0))
+    _put(d, 'Resonance', min(1.25, q / 8.0))
     _put(d, 'LfoAmount', 0.0)
     return d, 'approximate (Live Auto Filter as a wah)'
 
@@ -399,9 +424,10 @@ def from_cubase(w, fx, project=None):
                     return None
                 out.extend(m)
             else:
-                # a JS effect (volume, width, mixer): no Live counterpart
-                # mapped yet
-                return None
+                m = from_js(w, e[1], e[2])
+                if m is None:
+                    return None
+                out.append(m)
         return out
     from . import builtins
     name = (builtins.TABLE.get((fx.uid or '').upper()) or (None,))[0] or fx.name
@@ -411,3 +437,319 @@ def from_cubase(w, fx, project=None):
     if name and 'wah' in name.lower():
         return [wahwah(w, rec)]
     return None
+
+
+def utility(w, gain=1.0, width=1.0, mono=False):
+    """Live's Utility: gain (linear), stereo width (1 = 100 %), mono."""
+    d = w.gain_device(gain)
+    _put(d, 'StereoWidth', width)
+    _set(d, 'Mono', bool(mono))
+    return d
+
+
+def from_js(w, path, sliders):
+    """REAPER's utility JS effects that Cubase's own effects become
+    (stock.from_cubase) as Live's Utility: volume, and the stereo width
+    the channel mixer or Stillwell's Stereo Width makes. (device, how)
+    or None."""
+    lin = lambda db: 2.0 ** (db / 6.0)          # stock.js_db's inverse
+    if path == 'utility/volume' and sliders:
+        return utility(w, lin(sliders[0])), 'exact (Live Utility gain)'
+    if path == 'utility/channelmixer' and len(sliders) >= 4:
+        ll, rr, lr, rl = (lin(v) for v in sliders[:4])
+        if abs(ll - 0.5) < 1e-3 and abs(lr - 0.5) < 1e-3:
+            return utility(w, 1.0, 1.0, True), 'exact (Live Utility, mono)'
+        return utility(w, 1.0, max(0.0, ll - lr)), 'exact (Live Utility width)'
+    if path == 'sstillwell/stereowidth' and len(sliders) >= 3:
+        wb, cb, g = (10 ** (v / 20.0) for v in sliders[:3])
+        return utility(w, 1.0, min(4.0, (1 + wb * math.sqrt(2)) / (1 + cb))), \
+            'close (Live Utility width)'
+    return None
+
+
+# ------------------------------------------- Live -> REAPER (and Cubase)
+# The other way round: each of Live's own devices as the REAPER stock
+# effect it was mapped from above, with its settings - the inverse of each
+# mapping, so a Set that came from REAPER or Cubase goes back as it was,
+# and one made in Live gets the closest. From the REAPER blocks the reader
+# goes on exactly as for a REAPER project (als_read -> rpp_read): Cubase's
+# own effects (stock.to_cubase), the channel EQ, REAPER's own to REAPER.
+# Each returns ([('vst', name, data) | ('js', path, sliders)], how) or None.
+
+def _m(d, path, default=0.0):
+    n = d.find(path + '/Manual')
+    if n is None:
+        return default
+    v = n.get('Value')
+    if v in ('true', 'false'):
+        return v == 'true'
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def note_hz(n):
+    """Auto Filter's cutoff is a MIDI note number (20..135)."""
+    return 440.0 * 2.0 ** ((n - 69.0) / 12.0)
+
+
+def rev_compressor(d, tempo):
+    ratio = _m(d, 'Ratio', 4.0)
+    x = max(0.0, min(1.0, _m(d, 'DryWet', 1.0)))
+    makeup = _m(d, 'Gain', 0.0)
+    data = stock.reacomp(threshold_db=_db(_m(d, 'Threshold', 1.0)),
+                         ratio=min(ratio, 100.0), limit=ratio >= 100.0,
+                         attack_ms=_m(d, 'Attack', 3.0), release_ms=_m(d, 'Release', 100.0),
+                         knee_db=_m(d, 'Knee', 0.0),
+                         rms_ms=5.0 if int(_m(d, 'Model', 0)) == 1 else 0.0,
+                         makeup_db=makeup + _db(x) if x > 0 else -150.0,
+                         auto_makeup=bool(_m(d, 'GainCompensation', False)),
+                         auto_release=bool(_m(d, 'AutoReleaseControlOnOff', False)),
+                         dry_db=None if x >= 1.0 else _db(1.0 - x))
+    return [('vst', 'ReaComp', data)], 'close (ReaComp, same settings)'
+
+
+def rev_limiter(d, tempo):
+    ceil = min(0.0, _m(d, 'Ceiling', 0.0))
+    return [('vst', 'ReaLimit', stock.realimit(ceil - max(0.0, _m(d, 'Gain', 0.0)), ceil))], \
+        'close (ReaLimit)'
+
+
+def rev_gate(d, tempo):
+    floor = _m(d, 'Gain', -75.0)
+    data = stock.reagate(threshold_db=_db(_m(d, 'Threshold', 0.3)),
+                         attack_ms=_m(d, 'Attack', 0.1), release_ms=_m(d, 'Release', 30.0),
+                         hold_ms=_m(d, 'Hold', 10.0),
+                         closed_db=None if floor <= -75.0 else floor)
+    return [('vst', 'ReaGate', data)], 'close (ReaGate)'
+
+
+def rev_delay(d, tempo, post_gain=1.0):
+    x = max(0.0, min(1.0, _m(d, 'DryWet', 0.5)))
+    fb = max(0.0, _m(d, 'Feedback', 0.0))
+    lp, hp = 20000.0, 0.0
+    if _m(d, 'Filter_On', False):
+        f, bw = _m(d, 'Filter_Frequency', 1000.0), _m(d, 'Filter_Bandwidth', 8.0)
+        hp, lp = f / 2.0 ** (bw / 2.0), min(20000.0, f * 2.0 ** (bw / 2.0))
+    sixteenth_ms = 60000.0 / (tempo or 120.0) / 4.0
+    sides = []
+    for side in ('L', 'R'):
+        if _m(d, 'DelayLine_Sync' + side, False):
+            n = (1, 2, 3, 4, 5, 6, 8, 16)[max(0, min(7, int(_m(d, 'DelayLine_SyncedSixteenth' + side, 0))))]
+            sides.append((n * sixteenth_ms, n))
+        else:
+            sides.append((1000.0 * _m(d, 'DelayLine_Time' + side, 0.25), None))
+    linked = bool(_m(d, 'DelayLine_Link', True)) or sides[0] == sides[1]
+    use = [sides[0]] if linked else sides
+    pans = [0.0] if linked else [-1.0, 1.0]
+    taps = [dict(ms=ms, feedback=fb, lowpass=lp, hipass=hp, pan=pn, volume=1.0)
+            for (ms, _n), pn in zip(use, pans)]
+    data = stock.readelay(taps, wet_db=_db(post_gain * x),
+                          dry_db=_db(post_gain * (1.0 - x)) if x < 1 else None)
+    # a synced side: ReaDelay's own musical length (what delay() and
+    # stock.readelay_tap_ms read: sixteenths = 512 x the value, the time
+    # in ms 0), so it follows the tempo as Live's does
+    for k, (_ms, n) in enumerate(use):
+        if n:
+            struct.pack_into('<ff', data, 32 + 44 * k + 8, 0.0, n / 512.0)
+    return [('vst', 'ReaDelay', data)], 'close (ReaDelay)'
+
+
+def rev_reverb(d, tempo, post_gain=1.0, cuts=(None, None)):
+    """Reverb -> ReaVerbate, the inverse of reverb(): the room size whose
+    decay (through the same measured tables) is Live's DecayTime, the
+    damping from the high shelf, the levels from Dry/Wet and the tail's
+    measured shortfall. post_gain: a Utility right after it (what reverb()
+    writes) folds into the levels; cuts: an EQ Eight right before it with
+    only a low and/or high cut (ditto) - ReaVerbate's own filters."""
+    damp = 0.0
+    if _m(d, 'ShelfHighOn', False):
+        damp = max(0.0, min(1.0, (16000.0 - _m(d, 'ShelfHiFreq', 16000.0)) / 14500.0))
+    target = _m(d, 'DecayTime', 1200.0)
+
+    def decay(room):
+        k = max(0, min(9, int(room * 10)))
+        f = room * 10 - k
+        rt = math.exp(math.log(stock._VB_RT[k]) + f * (math.log(stock._VB_RT[k + 1]) - math.log(stock._VB_RT[k])))
+        return 1000.0 * rt * verb_decay(room, damp)
+    lo, hi = 0.0, 0.999
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        if decay(mid) < target:
+            lo = mid
+        else:
+            hi = mid
+    room = (lo + hi) / 2
+    x = max(0.0, min(1.0, _m(d, 'MixDirect', 0.5)))
+    K = _lin(verb_level_db(room, damp))
+    wet, dry = post_gain * x / K, post_gain * (1.0 - x)
+    width = max(-1.0, min(1.0, _m(d, 'StereoSeparation', 100.0) / 120.0))
+    hp, lp = cuts
+    data = stock.reaverbate(wet_db=_db(wet), dry_db=_db(dry) if dry > 1e-6 else None,
+                            room=room, damping=damp, width=width,
+                            delay_ms=0.0 if _m(d, 'PreDelay', 0.0) <= 0.5 + 1e-6 else _m(d, 'PreDelay', 0.0),   # 0.5 ms is Live's least
+                            lowpass=lp or 20000.0, hipass=hp or 0.0)
+    return [('vst', 'ReaVerbate', data)], \
+        'approximate (ReaVerbate: another algorithm, decay and level matched)'
+
+
+EQ8_TO_REAEQ = {2: 0, 5: 1, 3: 8, 1: 4, 0: 4, 6: 3, 7: 3}
+
+
+def _bw_of_q(q):
+    return 2.0 / math.log(2.0) * math.asinh(1.0 / (2.0 * max(0.1, q)))
+
+
+def eq8_bands(d):
+    """EQ Eight's bands (curve A) as ReaEQ's (type, on, Hz, linear gain,
+    bandwidth in octaves) - eq8()'s inverse; a notch is a deep narrow bell."""
+    rb = []
+    for k in range(8):
+        p = 'Bands.%d/ParameterA/' % k
+        if not _m(d, p + 'IsOn', False):
+            continue
+        mode = int(_m(d, p + 'Mode', 3))
+        hz, g, q = _m(d, p + 'Freq', 1000.0), _m(d, p + 'Gain', 0.0), _m(d, p + 'Q', 0.71)
+        if mode == 4:
+            rb.append((8, 1, hz, _lin(-30.0), _bw_of_q(q)))
+            continue
+        ty = EQ8_TO_REAEQ.get(mode)
+        if ty is None:
+            continue
+        bw = _bw_of_q(q) if ty == 8 else (1.8957 if ty in (3, 4) else 2.0)
+        rb.append((ty, 1, hz, _lin(g) if ty in (0, 1, 8) else 1.0, bw))
+    return rb
+
+
+def rev_eq8(d, tempo):
+    from . import chan_eq
+    rb = eq8_bands(d)
+    out = [('vst', 'ReaEQ', chan_eq.reaeq_data(rb))] if rb else []
+    gg = _m(d, 'GlobalGain', 0.0)
+    if abs(gg) > 1e-6:
+        out.append(('js', 'utility/volume', [stock.js_db(_lin(gg)), 150.0]))
+    return (out, 'close (ReaEQ, band for band)') if out else ([], 'no bands on')
+
+
+def rev_utility(d, tempo):
+    if _m(d, 'Mute', False):
+        return [('js', 'utility/volume', [-150.0, 150.0])], 'exact (muted)'
+    out = []
+    g = _m(d, 'Gain', 1.0)
+    if abs(g - 1.0) > 1e-6:
+        out.append(('js', 'utility/volume', [stock.js_db(g), 150.0]))
+    if _m(d, 'Mono', False):
+        out.append(stock.stereo_width(0.0, True))
+    elif abs(_m(d, 'StereoWidth', 1.0) - 1.0) > 1e-6:
+        out.append(stock.stereo_width(100.0 * _m(d, 'StereoWidth', 1.0)))
+    return out, 'exact (REAPER volume/width)'
+
+
+def rev_chorus(d, tempo):
+    x = max(0.0, min(1.0, _m(d, 'DryWet', 0.5)))
+    og = _m(d, 'OutputGain', 1.0)
+    sl = [15.0, 3.0 if int(_m(d, 'Mode', 0)) == 1 else 2.0,
+          max(0.1, min(16.0, _m(d, 'Rate', 0.6))), max(0.0, min(1.0, _m(d, 'Amount', 0.5))),
+          max(-100.0, _db(x * og)), max(-100.0, _db((1.0 - x) * og))]
+    return [('js', 'sstillwell/chorus', sl)], 'approximate (Stillwell Chorus)'
+
+
+def rev_autofilter(d, tempo):
+    """Auto Filter -> one ReaEQ band of its type at its cutoff (the
+    filter standing still - an LFO or envelope on it is not carried)."""
+    from . import chan_eq
+    ty = {0: 3, 1: 4, 2: 7, 3: 6}.get(int(_m(d, 'FilterType', 0)), 3)
+    hz = note_hz(_m(d, 'Cutoff', 135.0))
+    bw = max(0.1, 2.0 - 1.6 * min(1.0, _m(d, 'Resonance', 0.0)))
+    return [('vst', 'ReaEQ', chan_eq.reaeq_data([(ty, 1, hz, 1.0, bw)]))], \
+        'approximate (ReaEQ, the filter at its cutoff; modulation not carried)'
+
+
+LIVE_MAP = {'Compressor2': rev_compressor, 'Limiter': rev_limiter, 'Gate': rev_gate,
+            'Delay': rev_delay, 'Reverb': rev_reverb, 'Eq8': rev_eq8,
+            'StereoGain': rev_utility, 'Chorus2': rev_chorus, 'AutoFilter': rev_autofilter}
+
+
+def _plain_gain(d):
+    """A Utility that only sets a level (what gain_device writes)."""
+    return (not _m(d, 'Mute', False) and not _m(d, 'Mono', False)
+            and abs(_m(d, 'StereoWidth', 1.0) - 1.0) < 1e-6
+            and abs(_m(d, 'Balance', 0.0)) < 1e-6)
+
+
+def to_reaper(devs, tempo=120.0):
+    """Live's stock devices of a chain, in order, as REAPER blocks: a list
+    of (device, entries, how) - entries None where the device has no
+    counterpart. The Reverb that reverb() writes (an EQ Eight of cuts in
+    front, a Utility of gain behind) comes back as the one ReaVerbate."""
+    devs = list(devs)
+    out, k = [], 0
+    while k < len(devs):
+        d = devs[k]
+        fn = LIVE_MAP.get(d.tag)
+        if fn is None:
+            out.append((d, None, None))
+            k += 1
+            continue
+        if d.tag == 'Eq8' and k + 1 < len(devs) and devs[k + 1].tag == 'Reverb':
+            rb = eq8_bands(d)
+            if rb and all(b[0] in (3, 4) for b in rb) and abs(_m(d, 'GlobalGain', 0.0)) < 1e-6:
+                hp = max([b[2] for b in rb if b[0] == 4] or [0.0])
+                lp = min([b[2] for b in rb if b[0] == 3] or [20000.0])
+                post, step = 1.0, 2
+                nxt = devs[k + 2] if k + 2 < len(devs) else None
+                if nxt is not None and nxt.tag == 'StereoGain' and _plain_gain(nxt):
+                    post, step = _m(nxt, 'Gain', 1.0), 3
+                ent, how = rev_reverb(devs[k + 1], tempo, post, (hp, lp))
+                out.append((devs[k + 1], ent, how))
+                k += step
+                continue
+        if d.tag in ('Reverb', 'Delay'):
+            nxt = devs[k + 1] if k + 1 < len(devs) else None
+            if nxt is not None and nxt.tag == 'StereoGain' and _plain_gain(nxt):
+                ent, how = fn(d, tempo, _m(nxt, 'Gain', 1.0))
+                out.append((d, ent, how))
+                k += 2
+                continue
+        try:
+            got = fn(d, tempo)
+        except Exception:                # a device of another Live version
+            got = None
+        out.append((d, got[0] if got else None, got[1] if got else None))
+        k += 1
+    return out
+
+
+def cubase_direct(d):
+    """(Cubase effect name, its state) for a Live device Cubase has an
+    effect of its own for that no REAPER block stands between: Chorus-
+    Ensemble -> Chorus, a band-pass Auto Filter -> WahWah (the inverses of
+    chorus() and wahwah()). None otherwise."""
+    from . import builtins
+    if d.tag == 'Chorus2':
+        rec = {'rate': max(0.1, _m(d, 'Rate', 1.0)), 'temposync': 0.0,
+               'width': 100.0 * max(0.0, min(1.0, _m(d, 'Amount', 0.5))),
+               'spatial': 100.0 * max(0.0, min(1.0, _m(d, 'Width', 1.0))),
+               'mix': 100.0 * max(0.0, min(1.0, _m(d, 'DryWet', 0.5))), 'bypass': 0.0}
+        st = builtins.table_state('Chorus', rec)
+        return ('Chorus', st) if st else None
+    if d.tag == 'AutoFilter' and int(_m(d, 'FilterType', 0)) == 2:
+        comp, _c = builtins._template('WahWah')
+        if comp is None:
+            return None
+        r = builtins._records(comp)
+        lo = max(20.0, r['freqlow'][1]) if 'freqlow' in r else 500.0
+        hi = max(lo * 1.01, r['freqhigh'][1]) if 'freqhigh' in r else 2000.0
+        hz = note_hz(_m(d, 'Cutoff', 81.0))
+        x = max(0.0, min(1.0, math.log(max(hz, 1.0) / lo) / math.log(hi / lo)))
+        st = builtins.table_state('WahWah', {'pedal': 100.0 * x, 'pedalEnable': 1.0, 'bypass': 0.0})
+        return ('WahWah', st) if st else None
+    return None
+
+
+def template_uid(name):
+    import json
+    import os
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cubase_templates.json')
+    return (json.load(open(p)).get(name) or {}).get('uid')

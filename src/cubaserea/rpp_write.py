@@ -294,6 +294,14 @@ def write(proj, path, media_root=None, plugin_index=None, log=None):
         allfx = ([t.instrument] if t.instrument else []) + list(t.fx)
         from . import stock, builtins
         for k, fx in enumerate(allfx):
+            if getattr(fx, 'rpp_lines', None):
+                # REAPER's own plug-in a Live device became (als_read): its
+                # block as made, at this chain's indent
+                chain.extend(indent + x.strip() if not x.strip().startswith('>')
+                             else indent + x.strip() for x in fx.rpp_lines)
+                stats['fx'] += 1
+                stats['native equivalents'] = stats.get('native equivalents', 0) + 1
+                continue
             eq = None if getattr(fx, "native", False) else stock.from_cubase(fx, proj)
             if eq is not None:
                 # one of Cubase's own effects: the closest of REAPER's own

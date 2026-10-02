@@ -26,7 +26,7 @@ async function boot() {
   });
   ff.setLogger(({ message }) => ffLog.push(message));
   post('status', { text: 'Loading the converter…' });
-  const z = await (await fetch('converter.zip?v=bfe8050b24', { cache: 'no-cache' })).arrayBuffer();
+  const z = await (await fetch('converter.zip?v=7b3aee88cf', { cache: 'no-cache' })).arrayBuffer();
   py.FS.writeFile('/tmp/converter.zip', new Uint8Array(z));
   py.runPython(`
 import zipfile, sys

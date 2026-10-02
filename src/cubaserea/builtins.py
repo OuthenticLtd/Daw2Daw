@@ -195,6 +195,26 @@ def cubase_equivalents(js_path, sliders):
         each = 100.0 * (width / 100.0) ** (1.0 / n)
         return [(STEREO_ENHANCER_UID, stereo_enhancer_state(each), 'StereoEnhancer')] * n + \
                [(VOLUME_UID, volume_state(mg), 'Volume')]
+    if name.endswith(CHANNEL_MIXER):
+        # a symmetric channel mixer (L->L = R->R, L->R = R->L) is a mid/side
+        # matrix too: mid gain ll + lr, side gain ll - lr - StereoEnhancer's
+        # width for the side over the mid, Volume for the mid (what
+        # stock.stereo_width writes for Cubase's StereoEnhancer up to 100 %)
+        vals = []
+        for v in sliders:
+            try:
+                vals.append(float(v))
+            except ValueError:
+                break
+        if len(vals) >= 4 and abs(vals[0] - vals[1]) < 1e-6 and abs(vals[2] - vals[3]) < 1e-6 \
+                and vals[2] > -119.0 and abs(vals[0] - vals[2]) > 1e-6:
+            ll, lr = 2.0 ** (vals[0] / 6.0), 2.0 ** (vals[2] / 6.0)
+            mid, side = ll + lr, ll - lr
+            if side >= 0.0:
+                out = [(STEREO_ENHANCER_UID, stereo_enhancer_state(100.0 * side / mid), 'StereoEnhancer')]
+                if abs(mid - 1.0) > 1e-6:
+                    out.append((VOLUME_UID, volume_state(mid), 'Volume'))
+                return out
     one = cubase_equivalent(js_path, sliders)
     return [one] if one else None
 

@@ -998,9 +998,55 @@ class Writer:
         if getattr(f, 'native', False) and (f.name or '') in live_stock.REAPER_MAP:
             return live_stock.from_reaper(self, f.name,
                                           getattr(f, 'raw_state', None) or f.component)
-        if (f.name or '') in self.CUBASE_STOCK and getattr(self.p, 'pan_law_of', None) == 'cubase':
+        if getattr(f, 'native', False) and (f.name or '').startswith('ReaEQ'):
+            # a ReaEQ anywhere in the chain (one last in it is the channel
+            # EQ, written apart): EQ Eight, band for band
+            from . import chan_eq
+            rb = chan_eq.reaeq_state_bands(getattr(f, 'raw_state', None) or f.component)
+            return [live_stock.eq8(self, rb)] if rb else None
+        if getattr(f, 'native', False) and (f.name or '').startswith('JS: '):
+            # REAPER's volume / width JS effects: Live's Utility
+            got = live_stock.from_js(self, f.name[4:].strip(), self.js_sliders(f))
+            return [got] if got else None
+        # one of Cubase's own effects - from a Cubase project, or what the
+        # REAPER reader made of REAPER's own (its JS volume/width, ReaComp...)
+        if (f.name or '') in self.CUBASE_STOCK and (
+                getattr(self.p, 'pan_law_of', None) == 'cubase'
+                or (f.uid or '').upper() in self.cubase_uids()):
             return live_stock.from_cubase(self, f, self.p)
         return None
+
+    @staticmethod
+    def js_sliders(f):
+        """A JS effect's slider values from the block the REAPER reader kept."""
+        for e in (getattr(f, 'raw_group', None) or []):
+            if hasattr(e, 'raw'):
+                for x in e.raw:
+                    if isinstance(x, str) and x.strip():
+                        out = []
+                        for v in x.split():
+                            try:
+                                out.append(float(v))
+                            except ValueError:
+                                out.append(0.0)
+                        return out
+        return []
+
+    _CUBASE_UIDS = None
+
+    @classmethod
+    def cubase_uids(cls):
+        """The class ids of Cubase's own effects the converter knows."""
+        if cls._CUBASE_UIDS is None:
+            import json
+            from . import builtins, stock
+            ids = {k.upper() for k in builtins.TABLE}
+            ids |= {builtins.VOLUME_UID, builtins.STEREO_ENHANCER_UID}
+            ids |= {getattr(stock, n) for n in dir(stock) if n.endswith('_UID')}
+            p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cubase_templates.json')
+            ids |= {(v.get('uid') or '').upper() for v in json.load(open(p)).values()}
+            cls._CUBASE_UIDS = {i for i in ids if i}
+        return cls._CUBASE_UIDS
 
     VST2_DIRS = (r'C:\Program Files\Steinberg\VSTPlugins', r'C:\Program Files\VSTPlugins',
                  r'C:\Program Files\Common Files\VST2', r'C:\Program Files\Common Files\Steinberg\VST2')

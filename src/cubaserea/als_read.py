@@ -149,6 +149,7 @@ class Reader:
                 evs = envelope_events(env)
         self.tempo = TempoMap(bpm0, evs)
         self.unsupported = {}
+        self.stock_notes = {}
 
     def sec(self, beat):
         return self.tempo.seconds(max(0.0, beat))
@@ -167,9 +168,12 @@ class Reader:
         p.pan_law_of = 'reaper'
         p.panlaw = 1.0
         p.panmode = 3
+        self.p = p
         self.read_markers(p)
         self.read_tracks(p)
         self.read_master(p)
+        for k, n in sorted(self.stock_notes.items()):
+            self.log.append('%d x Live %s' % (n, k))
         for k, n in sorted(self.unsupported.items()):
             self.log.append('%d %s device(s) are Live\'s own and no other host has '
                             'them; left out' % (n, k))
@@ -262,6 +266,8 @@ class Reader:
                 t.delay = delay / 1000.0
             self.lanes(tr, mixer, t)
             self.read_devices(dc.find('DeviceChain/Devices'), t)
+            from . import rpp_read
+            rpp_read.finish_fx(t, p, self.log)
             if tr.tag == 'AudioTrack':
                 for c in dc.find('MainSequencer/Sample/ArrangerAutomation/Events'):
                     it = self.audio_clip(c)
@@ -304,6 +310,8 @@ class Reader:
         self.mix(mt.find('DeviceChain/Mixer'), m)
         self.lanes(mt, mt.find('DeviceChain/Mixer'), m)
         self.read_devices(mt.find('DeviceChain/DeviceChain/Devices'), m)
+        from . import rpp_read
+        rpp_read.finish_fx(m, p, self.log)
         p.master = m
 
     # ------------------------------------------------------- devices
@@ -346,10 +354,66 @@ class Reader:
             return f
         return None
 
+    def stock_fx(self, run, t):
+        """Live's own devices (a run of them between plug-ins) as the REAPER
+        stock effects they map to (live_stock.to_reaper), read by the REAPER
+        reader itself: the same Fx a REAPER project gives, so REAPER gets
+        its own plug-ins and Cubase its own effects from there."""
+        from . import live_stock, stock, rpp_read
+        out = []
+        tempo = self.p.tempo[0][1] if getattr(self, 'p', None) and self.p.tempo else 120.0
+        for d, entries, how in live_stock.to_reaper(run, tempo):
+            if entries is None:
+                self.unsupported[d.tag] = self.unsupported.get(d.tag, 0) + 1
+                continue
+            if not entries:
+                continue
+            on = _v(d, 'On/Manual', True, bool)
+            direct = live_stock.cubase_direct(d)
+            first = len(out)
+            for e in entries:
+                # one block at a time, so each Fx keeps the REAPER lines it
+                # came from (rpp_write writes those: REAPER's own plug-in
+                # as it is, not back through a Cubase effect)
+                lines = stock.lines([e], '  ', 0 if on else 1, 0)
+                chain = rpp_read.parse_lines(['<FXCHAIN'] + lines + ['>']).child('FXCHAIN')
+                for f in (rpp_read.read_fx(chain, self.log) if chain is not None else []):
+                    f.mapped_from = 'Live ' + d.tag
+                    f.rpp_lines = lines
+                    out.append(f)
+            if direct and len(out) == first + 1:
+                # Cubase's own effect for it, the REAPER block kept for REAPER
+                f = out[first]
+                f.name, f.component = direct
+                f.uid = live_stock.template_uid(direct[0]) or f.uid
+                f.controller = b''
+                f.native = False
+                f.raw_group = None
+            self.stock_notes['%s -> %s' % (d.tag, how)] = self.stock_notes.get('%s -> %s' % (d.tag, how), 0) + 1
+        return out
+
     def read_devices(self, devs, t):
         if devs is None:
             return
-        for d in devs:
+        devs = list(devs)
+        # a plain-gain Utility last in the chain is the level past the
+        # fader als_write puts there: it goes back onto the fader
+        if devs and devs[-1].tag == 'StereoGain':
+            from . import live_stock
+            if live_stock._plain_gain(devs[-1]) and (len(devs) < 2 or devs[-2].tag not in ('Reverb', 'Delay')):
+                if _v(devs[-1], 'On/Manual', True, bool):
+                    t.vol *= _v(devs[-1], 'Gain/Manual', 1.0)
+                devs = devs[:-1]
+        run = []
+        for d in devs + [None]:
+            if d is not None and d.tag not in ('PluginDevice', 'InstrumentGroupDevice'):
+                run.append(d)
+                continue
+            if run:
+                t.fx.extend(self.stock_fx(run, t))
+                run = []
+            if d is None:
+                break
             if d.tag == 'PluginDevice':
                 f = self.plugin(d)
                 if f is None:
@@ -376,14 +440,6 @@ class Reader:
                         else:
                             f.is_instrument = f.is_instrument or k == 0
                             t.fx.append(f)
-            elif d.tag == 'StereoGain':
-                # Utility: its gain (and mute) fold into the fader - the
-                # only thing als_write puts it there for
-                g = _v(d, 'Gain/Manual', 1.0)
-                if _v(d, 'On/Manual', True, bool):
-                    t.vol *= g
-            else:
-                self.unsupported[d.tag] = self.unsupported.get(d.tag, 0) + 1
 
     # --------------------------------------------------------- clips
     def file_of(self, c):
