@@ -623,12 +623,11 @@ function done(m) {
     'inside the unzipped folder. Opened straight from the zip, the DAW gets the project file without its audio.';
   resultEl.appendChild(hint);
   // audio the project names that was not among the files given
-  const m2 = logText.match(/(\d+) file\(s\) are not on this machine at all[^:]*: ([^
-]*)/);
+  const m2 = logText.match(/(\d+) file\(s\) are not on this machine at all[^:]*: ([^\n]*)/);
   if (m2) {
     const w = document.createElement('p');
     w.className = 'warn';
-    const names = m2[2].split('; ').map(p => p.split(/[\/]/).pop()).filter(Boolean);
+    const names = m2[2].split('; ').map(p => p.split(/[\\/]/).pop()).filter(Boolean);
     const shown = names.slice(0, 8).join(', ') + (names.length > 8 ? ', …' : '');
     w.textContent = `${m2[1]} audio file(s) the project uses were not in what you dropped: ${shown}. ` +
       'They will show as missing in the converted project. If you have them, drop the folder that holds them ' +
