@@ -628,11 +628,16 @@ function done(m) {
   if (m2) {
     const w = document.createElement('p');
     w.className = 'warn';
-    const names = m2[2].split('; ').map(p => p.split(/[\\/]/).pop()).filter(Boolean);
+    const paths = m2[2].split('; ').filter(Boolean);
+    const names = paths.map(p => p.split(/[\\/]/).pop());
+    const dirs = [...new Set(paths.map(p => p.replace(/[\\/][^\\/]*$/, '')))];
+    const vid = names.filter(n => /\.(mp4|mov|avi|mkv|m4v|wmv)$/i.test(n)).length;
+    const kind = vid === names.length ? 'video' : vid ? 'media' : 'audio';
     const shown = names.slice(0, 8).join(', ') + (names.length > 8 ? ', …' : '');
-    w.textContent = `${m2[1]} audio file(s) the project uses were not in what you dropped: ${shown}. ` +
-      'They will show as missing in the converted project. If you have them, drop the folder that holds them ' +
-      'together with the project (or a zip of both).';
+    w.textContent = `${m2[1]} ${kind} file(s) the project uses are outside the folder you dropped: ${shown}. ` +
+      `The project expects them in ${dirs.slice(0, 2).join(' and ')}${dirs.length > 2 ? ' and other folders' : ''}. ` +
+      'They will show as missing in the converted project - to include them, drop the folder above that ' +
+      'holds both the project and them (or a zip of it).';
     resultEl.appendChild(w);
   }
   setStatus(m.checked === null ? 'Converted. The details below list what did not come across.' :
