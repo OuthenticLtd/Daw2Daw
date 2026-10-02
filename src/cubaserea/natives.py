@@ -489,6 +489,290 @@ for _p in ('sstillwell/hpflpf', 'sstillwell/rbj4eq', 'sstillwell/rbj7eq', 'loser
     REAPER_TO_CUBASE['JS:' + _p] = r_js_eq(_p)
 
 
+# -------------------------------------------------------------- delays
+# Cubase's delays mix as StereoDelay does (measured there): wet
+# min(1, 2 mix), dry min(1, 2 (1 - mix)); a synced time is one of
+# stock.SYNC_NOTES (quarter notes) at the song's tempo.
+def _tempo(p):
+    return p.tempo[0][1] if p is not None and getattr(p, 'tempo', None) else 120.0
+
+
+def _ms(g, p, ms_key, sync_key, note_key, default=250.0):
+    ms = g(ms_key, default)
+    if g(sync_key) > 0.5:
+        ms = stock.SYNC_NOTES[max(0, min(17, int(round(g(note_key)))))] * 60000.0 / max(_tempo(p), 1.0)
+    return ms
+
+
+def _wetdry(mix_pct):
+    m = max(0.0, min(1.0, mix_pct / 100.0))
+    return min(1.0, 2 * m), min(1.0, 2 * (1 - m))
+
+
+def _delay(taps, wet, dry):
+    return [('vst', 'ReaDelay', stock.readelay(taps, wet_db=_db(wet) if wet > 0 else -150.0,
+                                               dry_db=_db(dry) if dry > 1e-6 else None))]
+
+
+def c_monodelay(r, p):
+    g = _g(r)
+    wet, dry = _wetdry(g('mix', 50.0))
+    tap = dict(ms=_ms(g, p, 'delay', 'temposync', 'syncnote', 250.0), feedback=g('feedback', 50.0) / 100.0,
+               hipass=g('filterL', 50.0) if g('filterLOn') > 0.5 else 0.0,
+               lowpass=g('filterH', 15000.0) if g('filterHOn') > 0.5 else 20000.0)
+    return _delay([tap], wet, dry), 'close (ReaDelay)'
+
+
+def c_studiodelay(r, p):
+    g = _g(r)
+    wet, dry = _wetdry(g('mix', 50.0))
+    o = db2lin(g('outgain'))
+    tap = dict(ms=_ms(g, p, 'delaytime0', 'temposync', 'syncnote', 500.0), feedback=g('feedback', 50.0) / 100.0,
+               hipass=g('lowcut', 20.0), lowpass=g('highcut', 20000.0),
+               width=max(-1.0, min(1.0, g('spatial', 50.0) / 50.0 - 1.0)))
+    return _delay([tap], wet * o, dry * o), 'close (ReaDelay; its macro effects are not carried)'
+
+
+def c_modmachine(r, p):
+    g = _g(r)
+    wet, dry = _wetdry(g('delaymix', 50.0))
+    tap = dict(ms=_ms(g, p, 'delaytime', 'temposync', 'syncnote', 500.0),
+               feedback=g('delayfeedback', 50.0) / 100.0)
+    return _delay([tap], wet, dry), 'approximate (ReaDelay; the modulation, drive and filter are not carried)'
+
+
+def c_multitap(r, p):
+    """MultiTap Delay: its taps (time, pan, level, feedback each)."""
+    g = _g(r)
+    base = g('delaytime0', 1000.0)
+    taps = []
+    for k in range(0, 9):
+        t = g('delaytime%d' % k)
+        if t <= 0:
+            continue
+        taps.append(dict(ms=t, pan=max(-1.0, min(1.0, g('panvalue%d' % k) / 100.0)),
+                         volume=g('levelvalue%d' % k, 100.0) / 100.0,
+                         feedback=g('feedbackvalue%d' % k) / 100.0))
+    if not taps:
+        taps = [dict(ms=base)]
+    wet, dry = _wetdry(g('mix', 50.0))
+    return _delay(taps, wet, dry), 'approximate (ReaDelay, its taps; the tap effects are not carried)'
+
+
+CUBASE_TO_REAPER.update({'MonoDelay': c_monodelay, 'StudioDelay': c_studiodelay,
+                         'ModMachine': c_modmachine, 'MultiTap Delay': c_multitap})
+
+
+# REAPER's JS delays as a ReaDelay block (then Cubase via stock.to_cubase,
+# Live via live_stock.delay): times in ms or a fraction of a whole note,
+# feedback and levels in dB (their sliders)
+def js_delay_data(path, sl, tempo=120.0):
+    v = list(sl) + [0.0] * 8
+    whole = 240000.0 / max(tempo, 1.0)
+    if path == 'delay/delay':
+        ms, fb, wet, dry = v[0], v[1], v[2] + v[3], v[4]
+        taps = [dict(ms=ms, feedback=db2lin(fb) if fb > -119 else 0.0)]
+    elif path == 'delay/delay_tone':
+        ms, fb, mix = v[0], v[1], v[6]
+        taps = [dict(ms=ms, feedback=db2lin(fb) if fb > -119 else 0.0)]
+        wet, dry = _db(max(mix, 1e-6)), _db(max(1.0 - mix, 1e-6))
+    elif path == 'sstillwell/delay_tempo':
+        ms = v[0] if v[0] > 0 else v[6] * whole
+        taps = [dict(ms=ms, feedback=db2lin(v[1]) if v[1] > -119 else 0.0)]
+        wet, dry = v[2] + v[3], v[4]
+    elif path == 'sstillwell/delay_pong':
+        ms = v[0] if v[0] > 0 else v[6] * whole
+        w = v[5] / 100.0
+        fb = db2lin(v[1]) if v[1] > -119 else 0.0
+        # ping-pong: repeats alternating sides, each down by the feedback
+        taps, lvl = [], 1.0
+        for k in range(1, 9):
+            taps.append(dict(ms=k * ms, pan=w if k % 2 == 0 else -w, width=0.0, volume=lvl))
+            lvl *= fb
+            if lvl < 1e-3:
+                break
+        wet, dry = v[2] + v[3], v[4]
+    else:
+        return None
+    return stock.readelay(taps, wet_db=wet, dry_db=dry if dry > -119 else None)
+
+
+def _js_delay_to_cubase(path):
+    def fn(sl, tempo):
+        data = js_delay_data(path, sl, tempo)
+        return stock.to_cubase('ReaDelay', data, tempo) if data else None
+    return fn
+
+
+for _p in ('delay/delay', 'delay/delay_tone', 'sstillwell/delay_tempo', 'sstillwell/delay_pong'):
+    REAPER_TO_CUBASE['JS:' + _p] = _js_delay_to_cubase(_p)
+
+
+# ---------------------------------------------------------- modulation
+# REAPER's JS targets (sliders in order, from their sources):
+JS_CHORUS = 'sstillwell/chorus'      # length ms, voices, rate Hz, depth 0..1, wet dB, dry dB
+JS_FLANGER = 'guitar/flanger'        # length ms, feedback dB, wet dB, dry dB, rate Hz
+JS_PHASER = 'guitar/phaser'          # rate Hz, range min Hz, range max Hz, feedback dB, wet dB
+JS_TREMOLO = 'guitar/tremolo'        # rate Hz, amount dB, stereo separation 0..1
+JS_PANNER = 'loser/ppp'              # rate Hz, width %
+JS_WAH = 'guitar/wah'                # position 0..1, resonance top, bottom, distortion
+
+
+def _rate(g, p, rate_key, sync_key, note_key, default=1.0):
+    """An LFO rate in Hz; a synced one is a note value (SYNC_NOTES, in
+    quarters) at the song's tempo."""
+    if g(sync_key) > 0.5:
+        q = stock.SYNC_NOTES[max(0, min(17, int(round(g(note_key)))))]
+        return _tempo(p) / 60.0 / max(q, 1e-3)
+    return g(rate_key, default)
+
+
+def _mix_db(mix_pct):
+    wet, dry = _wetdry(mix_pct)
+    return _db(wet) if wet > 0 else -100.0, _db(dry) if dry > 0 else -100.0
+
+
+def c_chorus(r, p, unit=''):
+    g = _g(r)
+    wet, dry = _mix_db(g('mix' + unit, 50.0))
+    return ('js', JS_CHORUS, [max(1.0, min(250.0, g('delay' + unit, 20.0))), 2.0,
+                              max(0.1, min(16.0, _rate(g, p, 'rate' + unit, 'temposync' + unit,
+                                                       'syncnote' + unit, 1.0))),
+                              max(0.0, min(1.0, g('width' + unit, 10.0) / 100.0)),
+                              max(-100.0, wet), max(-100.0, dry)])
+
+
+def c_studiochorus(r, p):
+    return [c_chorus(r, p, '1'), c_chorus(r, p, '2')], 'approximate (Stillwell Chorus, one per unit)'
+
+
+def c_vibrato(r, p):
+    g = _g(r)
+    return [('js', JS_CHORUS, [8.0, 1.0, max(0.1, min(16.0, _rate(g, p, 'rate', 'tempoSync', 'syncNote', 1.0))),
+                               max(0.0, min(1.0, g('depth', 75.0) / 100.0)), 0.0, -100.0])], \
+        'approximate (Stillwell Chorus, all wet: a vibrato)'
+
+
+def c_cloner(r, p):
+    g = _g(r)
+    wet, dry = _mix_db(g('mix', 50.0))
+    return [('js', JS_CHORUS, [max(1.0, g('delay', 50.0) / 2.0), max(1.0, min(8.0, g('nvoices', 4.0))), 0.3,
+                               max(0.0, min(1.0, g('detune', 50.0) / 100.0)), wet, dry])], \
+        'approximate (Stillwell Chorus, its voices)'
+
+
+def c_flanger(r, p):
+    g = _g(r)
+    wet, dry = _mix_db(g('mix', 50.0))
+    fb = g('feedback', 50.0) / 100.0
+    return [('js', JS_FLANGER, [max(0.0, min(200.0, g('delay', 2.0))),
+                                _db(fb) if fb > 1e-3 else -120.0, wet, dry,
+                                max(0.001, _rate(g, p, 'rate', 'temposync', 'syncnote', 1.0))])], \
+        'approximate (REAPER Flanger)'
+
+
+def c_phaser(r, p):
+    g = _g(r)
+    wet, _dry = _mix_db(g('mix', 50.0))
+    w = g('width', 50.0) / 100.0
+    lo, hi = 300.0 * (1.0 - 0.8 * w), 300.0 + 3000.0 * w
+    fb = g('feedback', 50.0) / 100.0
+    return [('js', JS_PHASER, [max(0.0, min(10.0, _rate(g, p, 'rate', 'temposync', 'syncnote', 1.0))),
+                               max(40.0, lo), min(20000.0, hi), max(-120.0, min(-1.0, _db(max(fb, 1e-6)))),
+                               max(-120.0, min(12.0, wet))])], 'approximate (REAPER Phaser)'
+
+
+def c_tremolo(r, p):
+    g = _g(r)
+    depth = max(0.0, min(0.999, g('depth', 75.0) / 100.0))
+    return [('js', JS_TREMOLO, [max(0.0, min(100.0, _rate(g, p, 'rate', 'tempoSync', 'syncNote', 8.0))),
+                                max(-60.0, _db(1.0 - depth)), max(0.0, min(1.0, g('spatial', 0.0) / 100.0))])], \
+        'close (REAPER Tremolo)'
+
+
+def c_autopan(r, p):
+    g = _g(r)
+    return [('js', JS_PANNER, [max(0.0, min(20.0, _rate(g, p, 'rate', 'temposync', 'syncnote', 1.0))),
+                               max(0.0, min(100.0, g('width', 75.0)))])], 'close (REAPER Ping Pong Pan)'
+
+
+def c_wahwah(r, p):
+    g = _g(r)
+    x = max(0.0, min(1.0, g('pedal', 50.0) / 100.0))
+    q = max(1.0, g('qlow', 50.0) * (1 - x) + g('qhigh', 50.0) * x)
+    # the frequency the pedal sets over its own sweep, as a position on a
+    # 200 .. 2000 Hz one (the sweep every target here shares)
+    lo, hi = max(20.0, g('freqlow', 200.0)), max(21.0, g('freqhigh', 2000.0))
+    hz = lo * (hi / lo) ** x
+    pos = max(0.0, min(1.0, math.log(hz / 200.0) / math.log(10.0)))
+    return [('js', JS_WAH, [pos, min(1.0, q / 100.0),
+                            min(1.0, q / 100.0), 0.0])], 'approximate (REAPER Wah-Wah)'
+
+
+CUBASE_TO_REAPER.update({
+    'Chorus': lambda r, p: ([c_chorus(r, p)], 'approximate (Stillwell Chorus)'),
+    'StudioChorus': c_studiochorus, 'Vibrato': c_vibrato, 'Cloner': c_cloner,
+    'Flanger': c_flanger, 'Phaser': c_phaser, 'Tremolo': c_tremolo, 'AutoPan': c_autopan,
+    'WahWah': c_wahwah,
+})
+
+
+def _crossfade_pct(wet_db, dry_db):
+    """Cubase's Mix (0..100) for a wet/dry pair: the inverse of _wetdry
+    (wet min(1, 2 m), dry min(1, 2 (1 - m))) - exact for a pair that
+    crossfade makes, the nearest otherwise."""
+    w, d = db2lin(wet_db) if wet_db > -99 else 0.0, db2lin(dry_db) if dry_db > -99 else 0.0
+    if w + d <= 1e-9:
+        return 50.0
+    m = w / 2.0 if w < 0.999 else 1.0 - d / 2.0
+    return 100.0 * max(0.0, min(1.0, m))
+
+
+def r_chorus(sl, tempo):
+    v = list(sl) + [0.0] * 6
+    if v[1] <= 1 and v[5] <= -99:
+        return 'Vibrato', {'rate': v[2], 'tempoSync': 0.0, 'depth': 100.0 * v[3], 'bypass': 0.0}, \
+            'close (Cubase Vibrato)'
+    return 'Chorus', {'rate': v[2], 'temposync': 0.0, 'width': 100.0 * v[3], 'delay': v[0],
+                      'mix': _crossfade_pct(v[4], v[5]), 'bypass': 0.0}, 'approximate (Cubase Chorus)'
+
+
+def r_flanger(sl, tempo):
+    v = list(sl) + [0.0] * 6
+    return 'Flanger', {'rate': v[4], 'temposync': 0.0, 'delay': max(0.1, v[0]),
+                       'feedback': 100.0 * db2lin(v[1]) if v[1] > -119 else 0.0,
+                       'mix': _crossfade_pct(v[2], v[3]), 'bypass': 0.0}, 'approximate (Cubase Flanger)'
+
+
+def r_phaser(sl, tempo):
+    v = list(sl) + [0.0] * 6
+    return 'Phaser', {'rate': v[0], 'temposync': 0.0, 'width': max(0.0, min(100.0, (v[2] - 300.0) / 30.0)),
+                      'feedback': 100.0 * db2lin(v[3]), 'mix': 100.0 * min(1.0, db2lin(v[4]) / 2.0),
+                      'bypass': 0.0}, 'approximate (Cubase Phaser)'
+
+
+def r_tremolo(sl, tempo):
+    v = list(sl) + [0.0] * 4
+    return 'Tremolo', {'rate': v[0], 'tempoSync': 0.0, 'depth': 100.0 * (1.0 - db2lin(v[1])),
+                       'spatial': 100.0 * v[2], 'bypass': 0.0}, 'close (Cubase Tremolo)'
+
+
+def r_panner(sl, tempo):
+    v = list(sl) + [0.0] * 2
+    return 'AutoPan', {'rate': v[0], 'temposync': 0.0, 'width': v[1], 'bypass': 0.0}, 'close (Cubase AutoPan)'
+
+
+def r_wah(sl, tempo):
+    v = list(sl) + [0.0] * 4
+    return 'WahWah', {'pedal': 100.0 * v[0], 'pedalEnable': 1.0, 'qlow': 100.0 * v[2], 'qhigh': 100.0 * v[1],
+                      'freqlow': 200.0, 'freqhigh': 2000.0, 'bypass': 0.0}, 'approximate (Cubase WahWah)'
+
+
+for _p, _f in ((JS_CHORUS, r_chorus), ('guitar/chorus', r_chorus), (JS_FLANGER, r_flanger),
+               (JS_PHASER, r_phaser), (JS_TREMOLO, r_tremolo), (JS_PANNER, r_panner), (JS_WAH, r_wah)):
+    REAPER_TO_CUBASE['JS:' + _p] = _f
+
+
 # --------------------------------------------------------- the hooks
 def js_sliders(fx):
     """A JS effect's slider values, from the block the REAPER reader kept."""
@@ -530,6 +814,8 @@ def to_cubase(key, payload, tempo=120.0):
     got = fn(payload, tempo)
     if not got:
         return None
+    if len(got) == 4:
+        return got
     name, rec, how = got
     st = builtins.table_state(name, rec)
     uid = builtins.uid_of_name(name)

@@ -455,7 +455,7 @@ def from_cubase(w, fx, project=None):
                 m = from_js(w, e[1], e[2])
                 if m is None:
                     return None
-                out.append(m)
+                out.extend(m if isinstance(m, list) else [m])
         return out
     from . import builtins
     name = (builtins.TABLE.get((fx.uid or '').upper()) or (None,))[0] or fx.name
@@ -778,22 +778,30 @@ def cubase_direct(d):
     chorus() and wahwah()). None otherwise."""
     from . import builtins
     if d.tag == 'Chorus2':
+        from . import natives
+        x, og = max(0.0, min(1.0, _m(d, 'DryWet', 0.5))), _m(d, 'OutputGain', 1.0)
+        mix = natives._crossfade_pct(_db(x * og) if x > 0 else -150.0, _db((1 - x) * og) if x < 1 else -150.0)
+        if int(_m(d, 'Mode', 0)) == 2:
+            rec = {'rate': max(0.1, _m(d, 'Rate', 1.0)), 'tempoSync': 0.0,
+                   'depth': 100.0 * max(0.0, min(1.0, _m(d, 'Amount', 0.5))), 'bypass': 0.0}
+            st = builtins.table_state('Vibrato', rec)
+            return ('Vibrato', st) if st else None
         rec = {'rate': max(0.1, _m(d, 'Rate', 1.0)), 'temposync': 0.0,
                'width': 100.0 * max(0.0, min(1.0, _m(d, 'Amount', 0.5))),
                'spatial': 100.0 * max(0.0, min(1.0, _m(d, 'Width', 1.0))),
-               'mix': 100.0 * max(0.0, min(1.0, _m(d, 'DryWet', 0.5))), 'bypass': 0.0}
+               'mix': mix, 'bypass': 0.0}
         st = builtins.table_state('Chorus', rec)
         return ('Chorus', st) if st else None
     if d.tag == 'AutoFilter' and int(_m(d, 'FilterType', 0)) == 2:
         comp, _c = builtins._template('WahWah')
         if comp is None:
             return None
-        r = builtins._records(comp)
-        lo = max(20.0, r['freqlow'][1]) if 'freqlow' in r else 500.0
-        hi = max(lo * 1.01, r['freqhigh'][1]) if 'freqhigh' in r else 2000.0
+        # the pedal over WahWah's default sweep, 200 .. 2000 Hz
+        lo, hi = 200.0, 2000.0
         hz = note_hz(_m(d, 'Cutoff', 81.0))
         x = max(0.0, min(1.0, math.log(max(hz, 1.0) / lo) / math.log(hi / lo)))
-        st = builtins.table_state('WahWah', {'pedal': 100.0 * x, 'pedalEnable': 1.0, 'bypass': 0.0})
+        st = builtins.table_state('WahWah', {'pedal': 100.0 * x, 'pedalEnable': 1.0, 'bypass': 0.0,
+                                             'freqlow': lo, 'freqhigh': hi})
         return ('WahWah', st) if st else None
     return None
 
@@ -801,8 +809,9 @@ def cubase_direct(d):
 def template_uid(name):
     import json
     import os
+    from . import builtins
     p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cubase_templates.json')
-    return (json.load(open(p)).get(name) or {}).get('uid')
+    return (json.load(open(p)).get(name) or {}).get('uid') or builtins.uid_of_name(name)
 
 
 # ------------------------------------------------- dynamics (natives.py)
@@ -953,3 +962,214 @@ def _js_eq(path):
 
 for _p in ('sstillwell/hpflpf', 'sstillwell/rbj4eq', 'sstillwell/rbj7eq', 'loser/3BandEQ', 'loser/4BandEQ'):
     JS_MAP[_p] = _js_eq(_p)
+
+
+# ---------------------------------------------- delays (natives.py)
+SIXTEENTHS = (1, 2, 3, 4, 5, 6, 8, 16)       # Live's synced delay steps (Delay)
+
+
+def _sixteenth_ms(tempo):
+    return 60000.0 / max(tempo or 120.0, 1.0) / 4.0
+
+
+def rev_echo(d, tempo):
+    """Echo -> ReaDelay: its left and right times (synced in sixteenths),
+    feedback, filters, width and Dry/Wet. Its tape, noise, wobble, reverb
+    and ducking have no ReaDelay counterpart."""
+    taps = []
+    for side, pan in (('L', -1.0), ('R', 1.0)):
+        if _m(d, 'Delay_Sync' + side, False):
+            ms = _m(d, 'Delay_SyncedSixteenth' + side, 4) * _sixteenth_ms(tempo)
+        else:
+            ms = 1000.0 * _m(d, 'Delay_Time' + side, 0.375)
+        taps.append(dict(ms=ms, pan=pan * min(1.0, _m(d, 'StereoWidth', 1.0)), width=0.0,
+                         feedback=min(0.99, _m(d, 'Feedback', 0.5)),
+                         hipass=_m(d, 'Filter_HighPassFrequency', 20.0) if _m(d, 'Filter_On', False) else 0.0,
+                         lowpass=_m(d, 'Filter_LowPassFrequency', 20000.0) if _m(d, 'Filter_On', False) else 20000.0))
+    if _m(d, 'Delay_TimeLink', False):
+        taps = [dict(taps[0], pan=0.0)]
+    x = max(0.0, min(1.0, _m(d, 'DryWet', 0.5)))
+    og = _m(d, 'OutputGain', 1.0)
+    data = stock.readelay(taps, wet_db=_db(x * og), dry_db=_db((1 - x) * og) if x < 1 else None)
+    return [('vst', 'ReaDelay', data)], 'approximate (ReaDelay; the Echo\'s character - tape, noise, ' \
+        'reverb, ducking - is not carried)'
+
+
+def rev_filterdelay(d, tempo):
+    """Filter Delay -> ReaDelay: its three delays (left, both, right), each
+    with its band-pass, feedback, pan and level, and the dry."""
+    taps = []
+    for k, side in ((1, -1.0), (2, 0.0), (3, 1.0)):
+        if not _m(d, 'On%d' % k, True):
+            continue
+        if _m(d, 'DelayTimeSwitch%d' % k, False):
+            ms = SIXTEENTHS[max(0, min(7, int(_m(d, 'BeatDelayEnum%d' % k, 0))))] * _sixteenth_ms(tempo)
+        else:
+            ms = _m(d, 'DelayTime%d' % k, 100.0)
+        lp, hp = 20000.0, 0.0
+        if _m(d, 'FilterOn%d' % k, True):
+            f0, bw = _m(d, 'MidFreq%d' % k, 1000.0), _m(d, 'BandWidth%d' % k, 2.0)
+            hp, lp = f0 / 2 ** (bw / 2), min(20000.0, f0 * 2 ** (bw / 2))
+        taps.append(dict(ms=ms, feedback=_m(d, 'Feedback%d' % k, 0.0), pan=_m(d, 'Pan%d' % k, 0.0),
+                         volume=_m(d, 'Volume%d' % k, 1.0), hipass=hp, lowpass=lp))
+    if not taps:
+        return None
+    data = stock.readelay(taps, wet_db=0.0, dry_db=_db(_m(d, 'DryVolume', 1.0)))
+    return [('vst', 'ReaDelay', data)], 'close (ReaDelay, its three delays)'
+
+
+def rev_graindelay(d, tempo):
+    if _m(d, 'SyncMode', False):
+        ms = SIXTEENTHS[max(0, min(7, int(_m(d, 'BeatDelayEnum', 0))))] * _sixteenth_ms(tempo)
+    else:
+        ms = _m(d, 'MsDelay', 50.0)
+    x = max(0.0, min(1.0, _m(d, 'NewDryWet', 0.5)))
+    data = stock.readelay([dict(ms=ms, feedback=_m(d, 'Feedback', 0.0))], wet_db=_db(x),
+                          dry_db=_db(1 - x) if x < 1 else None)
+    return [('vst', 'ReaDelay', data)], 'approximate (ReaDelay; the grains and pitch are not carried)'
+
+
+LIVE_MAP['Echo'] = rev_echo
+LIVE_MAP['FilterDelay'] = rev_filterdelay
+LIVE_MAP['GrainDelay'] = rev_graindelay
+
+
+def _js_delay(path):
+    def fn(w, sliders):
+        from . import natives
+        tempo = w.tempo[0][1] if getattr(w, 'tempo', None) else 120.0
+        data = natives.js_delay_data(path, sliders, tempo)
+        return delay(w, data, tempo) if data else None
+    return fn
+
+
+for _p in ('delay/delay', 'delay/delay_tone', 'sstillwell/delay_tempo', 'sstillwell/delay_pong'):
+    JS_MAP[_p] = _js_delay(_p)
+
+
+# ------------------------------------------ modulation (natives.py)
+# Phaser-Flanger's Mode: 0 phaser, 1 flanger, 2 doubler (its presets:
+# "Doubler ..." are 2); Auto Pan's Phase 0 moves both sides together (a
+# tremolo), 180 opposite (a pan).
+def chorus_js(w, sl):
+    v = list(sl) + [0.0] * 6
+    d = w.stock_device('chorus')
+    vib = v[1] <= 1 and v[5] <= -99
+    _set(d, 'Mode', 2 if vib else 0)
+    _put(d, 'Rate', max(0.1, v[2]))
+    _put(d, 'Amount', max(0.0, min(1.0, v[3])))
+    _put(d, 'Feedback', 0.0)
+    _put(d, 'Width', 1.0)
+    wet, dry = (_lin(v[4]) if v[4] > -99 else 0.0), (_lin(v[5]) if v[5] > -99 else 0.0)
+    _put(d, 'DryWet', wet / (wet + dry) if wet + dry > 1e-9 else 0.5)
+    _put(d, 'OutputGain', min(2.0, wet + dry))
+    return d, 'approximate (Live Chorus-Ensemble)'
+
+
+def _phaserflanger(w, mode, rate, amount, feedback, mix, delay_s=None, center=None, gain=1.0):
+    d = w.stock_device('phaserflanger')
+    _set(d, 'Mode', mode)
+    _set(d, 'Modulation_Sync', False)
+    _put(d, 'Modulation_Frequency', max(0.01, rate))
+    _put(d, 'Modulation_Amount', max(0.0, min(1.0, amount)))
+    _put(d, 'Feedback', max(0.0, min(0.99, feedback)))
+    _put(d, 'DryWet', max(0.0, min(1.0, mix)))
+    _put(d, 'OutputGain', max(0.0, min(2.0, gain)))
+    _set(d, 'Modulation_EnvelopeEnabled', False)
+    if delay_s is not None:
+        _put(d, 'FlangerDelayTime', delay_s)
+    if center is not None:
+        _put(d, 'CenterFrequency', center)
+    return d
+
+
+def flanger_js(w, sl):
+    v = list(sl) + [0.0] * 6
+    wet, dry = (_lin(v[2]) if v[2] > -119 else 0.0), (_lin(v[3]) if v[3] > -119 else 0.0)
+    d = _phaserflanger(w, 1, v[4], 0.5, _lin(v[1]) if v[1] > -119 else 0.0,
+                       wet / (wet + dry) if wet + dry > 1e-9 else 0.5, delay_s=max(0.0001, min(0.02, v[0] / 1000.0)),
+                       gain=wet + dry)
+    return d, 'approximate (Live Phaser-Flanger, Flanger)'
+
+
+def phaser_js(w, sl):
+    v = list(sl) + [0.0] * 6
+    lo, hi = max(70.0, v[1]), max(v[1] * 1.01, v[2])
+    d = _phaserflanger(w, 0, v[0], min(1.0, math.log2(hi / lo) / 5.0), _lin(v[3]),
+                       min(1.0, _lin(v[4]) / 2.0), center=math.sqrt(lo * hi))
+    return d, 'approximate (Live Phaser-Flanger, Phaser)'
+
+
+def _autopan(w, rate, amount, phase):
+    d = w.stock_device('autopan')
+    _set(d, 'Lfo/RateType', 0)
+    _put(d, 'Lfo/Frequency', max(0.05, rate))
+    _put(d, 'Lfo/LfoAmount', max(0.0, min(1.0, amount)))
+    _put(d, 'Lfo/Phase', phase)
+    _put(d, 'Lfo/Offset', 0.0)
+    _put(d, 'Lfo/Spin', 0.0)
+    _set(d, 'Lfo/Type', 0)
+    return d
+
+
+def tremolo_js(w, sl):
+    v = list(sl) + [0.0] * 3
+    return _autopan(w, v[0], 1.0 - _lin(v[1]), 170.0 * max(0.0, min(1.0, v[2]))), \
+        'close (Live Auto Pan as a tremolo)'
+
+
+def panner_js(w, sl):
+    v = list(sl) + [0.0] * 2
+    return _autopan(w, v[0], v[1] / 100.0, 180.0), 'close (Live Auto Pan)'
+
+
+def wah_js(w, sl):
+    v = list(sl) + [0.0] * 4
+    d = w.stock_device('autofilter')
+    hz = 200.0 * (2000.0 / 200.0) ** max(0.0, min(1.0, v[0]))
+    _set(d, 'FilterType', 2)
+    _put(d, 'Cutoff', 69.0 + 12.0 * math.log2(hz / 440.0))
+    _put(d, 'Resonance', min(1.25, 0.4 + v[1]))
+    _put(d, 'LfoAmount', 0.0)
+    return d, 'approximate (Live Auto Filter as a wah)'
+
+
+def rev_phaserflanger(d, tempo):
+    mode = int(_m(d, 'Mode', 0))
+    rate = _m(d, 'Modulation_Frequency', 0.5)
+    x = max(0.0, min(1.0, _m(d, 'DryWet', 0.5)))
+    og = _m(d, 'OutputGain', 1.0)
+    fb = _m(d, 'Feedback', 0.0)
+    from . import natives
+    if mode == 1:
+        sl = [1000.0 * _m(d, 'FlangerDelayTime', 0.0025), _db(fb) if fb > 1e-3 else -120.0,
+              _db(x * og) if x > 0 else -120.0, _db((1 - x) * og) if x < 1 else -120.0, rate]
+        return [('js', natives.JS_FLANGER, sl)], 'approximate (REAPER Flanger)'
+    if mode == 2:
+        sl = [1000.0 * _m(d, 'DoublerDelayTime', 0.03), 1.0, rate, _m(d, 'Modulation_Amount', 0.3),
+              _db(x) if x > 0 else -100.0, _db(1 - x) if x < 1 else -100.0]
+        return [('js', natives.JS_CHORUS, sl)], 'approximate (Stillwell Chorus as a doubler)'
+    c = _m(d, 'CenterFrequency', 1000.0)
+    span = 2 ** (2.5 * _m(d, 'Modulation_Amount', 0.4))
+    sl = [rate, max(40.0, c / span), min(20000.0, c * span), max(-120.0, min(-1.0, _db(max(fb, 1e-6)))),
+          _db(2 * x) if x > 0 else -120.0]
+    return [('js', natives.JS_PHASER, sl)], 'approximate (REAPER Phaser)'
+
+
+def rev_autopan(d, tempo):
+    from . import natives
+    rate = _m(d, 'Lfo/Frequency', 1.0)
+    if int(_m(d, 'Lfo/RateType', 0)) == 1:
+        rate = (tempo or 120.0) / 60.0       # a beat-synced rate: one cycle a beat
+    amt = _m(d, 'Lfo/LfoAmount', 0.5)
+    ph = _m(d, 'Lfo/Phase', 180.0)
+    if ph < 175.0:
+        return [('js', natives.JS_TREMOLO, [rate, _db(max(1e-3, 1.0 - amt)), ph / 170.0])],             'close (REAPER Tremolo)'
+    return [('js', natives.JS_PANNER, [min(20.0, rate), 100.0 * amt])], 'close (REAPER Ping Pong Pan)'
+
+
+LIVE_MAP['PhaserNew'] = rev_phaserflanger
+LIVE_MAP['AutoPan'] = rev_autopan
+JS_MAP.update({'sstillwell/chorus': chorus_js, 'guitar/chorus': chorus_js, 'guitar/flanger': flanger_js,
+               'guitar/phaser': phaser_js, 'guitar/tremolo': tremolo_js, 'loser/ppp': panner_js,
+               'guitar/wah': wah_js})

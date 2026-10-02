@@ -999,7 +999,7 @@ class Writer:
         if js:
             got = live_stock.from_js(self, js[0], js[1])
             if got:
-                return [got]
+                return got if isinstance(got, list) else [got]
         if getattr(f, 'native', False) and (f.name or '') in live_stock.REAPER_MAP:
             return live_stock.from_reaper(self, f.name,
                                           getattr(f, 'raw_state', None) or f.component)
@@ -1012,7 +1012,7 @@ class Writer:
         if getattr(f, 'native', False) and (f.name or '').startswith('JS: '):
             # REAPER's volume / width JS effects: Live's Utility
             got = live_stock.from_js(self, f.name[4:].strip(), self.js_sliders(f))
-            return [got] if got else None
+            return (got if isinstance(got, list) else [got]) if got else None
         # one of Cubase's own effects - from a Cubase project, or what the
         # REAPER reader made of REAPER's own (its JS volume/width, ReaComp...)
         if ((f.name or '') in self.CUBASE_STOCK or (f.uid or '').upper() in self.cubase_uids()) and (

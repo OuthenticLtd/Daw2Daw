@@ -27,6 +27,27 @@ L = stock.db2lin
 
 # family -> [(case name, 'cubase', effect name, records) | (name, 'reaper', [entries])]
 CASES = {
+    'modulation': [
+        ('c_chorus', 'cubase', 'Chorus', {'rate': 0.8, 'temposync': 0.0, 'width': 30.0, 'mix': 40.0}),
+        ('c_flanger', 'cubase', 'Flanger', {'rate': 0.5, 'temposync': 0.0, 'feedback': 40.0, 'mix': 50.0}),
+        ('c_phaser', 'cubase', 'Phaser', {'rate': 0.4, 'temposync': 0.0, 'feedback': 30.0, 'mix': 50.0}),
+        ('c_tremolo', 'cubase', 'Tremolo', {'rate': 5.0, 'depth': 60.0}),
+        ('c_autopan', 'cubase', 'AutoPan', {'rate': 2.0, 'width': 80.0}),
+        ('c_vibrato', 'cubase', 'Vibrato', {'rate': 5.0, 'tempoSync': 0.0, 'depth': 40.0}),
+        ('c_wah', 'cubase', 'WahWah', {'pedal': 60.0}),
+        ('r_chorus', 'reaper', [('js', 'sstillwell/chorus', [12.0, 2.0, 0.7, 0.4, -6.0, -3.0])]),
+        ('r_flanger', 'reaper', [('js', 'guitar/flanger', [5.0, -10.0, -6.0, -6.0, 0.4])]),
+        ('r_phaser', 'reaper', [('js', 'guitar/phaser', [0.6, 300.0, 2000.0, -6.0, 0.0])]),
+        ('r_trem', 'reaper', [('js', 'guitar/tremolo', [6.0, -12.0, 0.0])]),
+        ('r_ppp', 'reaper', [('js', 'loser/ppp', [1.5, 70.0])]),
+    ],
+    'delay': [
+        ('c_mono', 'cubase', 'MonoDelay', {'delay': 320.0, 'temposync': 0.0, 'feedback': 40.0, 'mix': 30.0}),
+        ('c_studio', 'cubase', 'StudioDelay', {'delaytime0': 450.0, 'temposync': 0.0, 'feedback': 35.0, 'mix': 40.0}),
+        ('c_modm', 'cubase', 'ModMachine', {'delaytime': 280.0, 'temposync': 0.0, 'delayfeedback': 30.0}),
+        ('r_jsdelay', 'reaper', [('js', 'delay/delay', [350.0, -8.0, 0.0, -6.0, 0.0, 0.0])]),
+        ('r_jspong', 'reaper', [('js', 'sstillwell/delay_pong', [300.0, -10.0, 0.0, -6.0, 0.0, 80.0, 0.25])]),
+    ],
     'eq': [
         ('c_studioeq', 'cubase', 'StudioEQ', {'gainlfl': 4.0, 'freqlfl': 120.0, 'gainp1l': -3.0, 'qp1l': 2.0,
                                              'freqp1l': 800.0, 'hftype': 3.0, 'freqhfl': 9000.0}),
