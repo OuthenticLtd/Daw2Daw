@@ -174,9 +174,12 @@ class Reader:
         self.read_master(p)
         for k, n in sorted(self.stock_notes.items()):
             self.log.append('%d x Live %s' % (n, k))
+        from . import live_stock
         for k, n in sorted(self.unsupported.items()):
-            self.log.append('%d %s device(s) are Live\'s own and no other host has '
-                            'them; left out' % (n, k))
+            what = live_stock.UNMATCHED_LIVE.get(k)
+            self.log.append("%d %s device(s)%s are Live's own and no other host has anything like "
+                            "them; left out - freeze/render the track in Live to keep its sound"
+                            % (n, k, (' (%s)' % what) if what else ''))
         return p
 
     def read_markers(self, p):

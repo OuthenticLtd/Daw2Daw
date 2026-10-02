@@ -1196,6 +1196,14 @@ class Writer:
                     target.append(dev)
                     self.stock_notes.append('%s -> %s' % (f.name, how))
                 return
+            from . import builtins
+            if builtins.name_of_uid(f.uid) and not getattr(f, 'native', False):
+                # one of Cubase's own effects with nothing like it in Live:
+                # a VST3 of that id would only stand there missing
+                self.log.append("%s on %r is one of Cubase's own effects and Live has nothing like "
+                                "it; left out - render the track in place in Cubase before converting "
+                                "to keep its sound" % (f.name, t.name))
+                return
             d = self.plugin_device(f, inst)
             if d is None and is_vst2(f):
                 d = self.vst2_device(f)

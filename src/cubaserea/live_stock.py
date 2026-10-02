@@ -1351,3 +1351,35 @@ def rev_drumbuss(d, tempo):
 REAPER_MAP['ReaPitch'] = shifter
 LIVE_MAP.update({'Shifter': rev_shifter, 'Hybrid': rev_hybrid, 'DrumBuss': rev_drumbuss})
 JS_MAP['loser/TransientController'] = transient_js
+
+
+# ------------------------------------------- the rest of Live's, approximate
+def rev_amp(d, tempo):
+    from . import natives
+    return [('js', natives.JS_DIST, [50.0 * max(0.0, min(1.0, _m(d, 'Gain', 0.5))), 4.0, -6.0, 2.0])] \
+        + natives._out(_db(max(1e-3, _m(d, 'Volume', 1.0)))), \
+        'approximate (REAPER Distortion; the amp model is not carried)'
+
+
+def rev_cabinet(d, tempo):
+    """Cabinet -> a speaker's band in ReaEQ (high pass 80 Hz, low pass 5 kHz)."""
+    from . import chan_eq
+    return [('vst', 'ReaEQ', chan_eq.reaeq_data([(4, 1, 80.0, 1.0, 1.8957), (3, 1, 5000.0, 1.0, 1.8957)]))], \
+        'approximate (ReaEQ, a speaker\'s band; the cabinet model is not carried)'
+
+
+def rev_vinyl(d, tempo):
+    from . import natives
+    return [('js', natives.JS_SAT, [30.0 * max(0.0, min(1.0, _m(d, 'Drive', 0.0)))])], \
+        'approximate (REAPER Saturation; the crackle and pinch are not carried)'
+
+
+LIVE_MAP.update({'Amp': rev_amp, 'Cabinet': rev_cabinet, 'Vinyl': rev_vinyl})
+
+# Live's own devices with nothing like them in the other DAWs: left out,
+# said so (modulators and meters make no sound of their own)
+UNMATCHED_LIVE = {'Corpus': 'a physical-model resonator', 'Resonator': 'a resonator bank',
+                  'Vocoder': 'a vocoder', 'BeatRepeat': 'a beat repeater', 'Looper': 'a looper',
+                  'SpectralResonator': 'a spectral resonator', 'SpectralTime': 'a spectral freeze/delay',
+                  'Erosion': 'a noise modulator', 'FrequencyShifter': 'a frequency shifter',
+                  'MxDeviceAudioEffect': 'a Max for Live device', 'ProxyAudioEffectDevice': 'an external effect'}

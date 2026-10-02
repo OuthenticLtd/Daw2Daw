@@ -916,6 +916,67 @@ METERS_CUBASE = ('SuperVision', 'Tuner', 'TestGenerator')
 METERS_LIVE = ('SpectrumAnalyzer', 'Spectrum', 'Tuner')
 
 
+# ------------------------------------------------ the rest, approximate
+def c_rotary(r, p):
+    """Rotary: its horn's amplitude and Doppler as a tremolo and a light
+    chorus at the rotor's speed (Speed 0.5 is slow, ~0.8 Hz; 1 fast, ~7 Hz)."""
+    g = _g(r)
+    hz = 0.8 + 6.0 * max(0.0, min(1.0, g('speed', 0.5)))
+    return [('js', JS_TREMOLO, [hz, -6.0, 1.0]),
+            ('js', JS_CHORUS, [3.0, 1.0, hz, 0.3, -6.0, -3.0])], \
+        'approximate (REAPER Tremolo + Chorus; the speaker model is not carried)'
+
+
+def c_quadrafuzz(r, p):
+    g = _g(r)
+    drives = [g('drive%d' % k, 0.0) for k in range(1, 5) if g('byp%d' % k) < 0.5 and g('mute%d' % k) < 0.5]
+    d = sum(drives) / len(drives) if drives else 0.0
+    return [('js', JS_DIST, [max(0.0, min(50.0, d / 2.0)), 6.0, -6.0, 2.0])], \
+        'approximate (REAPER Distortion, the bands\' mean drive)'
+
+
+def c_ampbig(r, p):
+    g = _g(r)
+    return [('js', JS_DIST, [max(0.0, min(50.0, 5.0 * g('drive', 5.0))), 4.0, -6.0, 2.0])] \
+        + _out(4.0 * (g('volume', 5.0) - 5.0)), 'approximate (REAPER Distortion; its amp, cabinet and ' \
+        'pedal models are not carried)'
+
+
+def c_squasher(r, p):
+    """Squasher: its bands' downward compression (threshold upper, ratio)
+    as ReaXcomp's; the upward half and gate are not carried."""
+    g = _g(r)
+    n = int(g('compAnoBands', 2.0)) + 1
+    bands = []
+    for k in range(1, n + 1):
+        bands.append(dict(top_hz=g('compAfreq%d' % k, 24000.0) if k < n else 24000.0,
+                          gain_db=g('compAoutput%d' % k, 0.0) - 6.0, threshold_db=g('compAthresholdupper%d' % k, -30.0),
+                          ratio=1.0 + g('compAratio%d' % k, 50.0) / 10.0, attack_ms=g('compAattack%d' % k, 0.5),
+                          release_ms=g('compArelease%d' % k, 50.0), rms_ms=0.0,
+                          active=g('compAbandon%d' % k, 1.0) > 0.5))
+    return [('vst', 'ReaXcomp', reaxcomp(bands))], 'approximate (ReaXcomp; the upward compression is not carried)'
+
+
+def c_envshaper_mb(r, p):
+    g = _g(r)
+    keys = [k for k in ('attack1', 'attack2', 'attack3', 'attack4', 'attackgain', 'attack') if k in r]
+    a = sum(g(k) for k in keys) / len(keys) if keys else 0.0
+    return [('js', 'loser/TransientController', [max(-100.0, min(100.0, 5.0 * a)), 0.0, 0.0])], \
+        'approximate (REAPER Transient Controller, the bands\' mean attack)'
+
+
+CUBASE_TO_REAPER.update({
+    'Rotary': c_rotary, 'Quadrafuzz v2': c_quadrafuzz, 'VST Amp Rack': c_ampbig, 'VST Bass Amp': c_ampbig,
+    'Squasher': c_squasher, 'MultibandEnvelopeShaper': c_envshaper_mb, 'UltraShaper': c_envshaper_mb,
+})
+
+# Cubase's own effects with nothing like them elsewhere: left out, said so
+UNMATCHED_CUBASE = ('Vocoder', 'VocalChain', 'Pitch Correct', 'FX Modulator', 'Mix6To2', 'MixerDelay',
+                    'MIDI Gate', 'ModScripter', 'Step Modulator', 'Grungelizer', 'Metalizer', 'Tranceformer',
+                    'RingModulator', 'Chopper', 'StepFilter', 'Bitcrusher', 'DaTube', 'MorphFilter',
+                    'DualFilter', 'AutoFilter', 'ToneBooster')
+
+
 # --------------------------------------------------------- the hooks
 def js_sliders(fx):
     """A JS effect's slider values, from the block the REAPER reader kept."""
