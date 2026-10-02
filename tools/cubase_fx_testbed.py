@@ -70,9 +70,20 @@ def main():
     w.setframerate(48000)
     w.writeframes((x * 32767).astype('<i2').tobytes())
     w.close()
-    uid, comp, ctrl = factory_effect(name)
+    # name '-': each case names its own effect: [track, effect, records]
+    if name == '-':
+        cases = [(c[0], c[1], c[2]) for c in cases]
+    else:
+        cases = [(c[0], name, c[1]) for c in cases]
+    states = {}
+    for _t, eff, _r in cases:
+        if eff not in states:
+            if builtins._template(eff)[0] is not None:
+                states[eff] = (builtins.uid_of_name(eff) or factory_effect(eff)[0],) + builtins._template(eff)
+            else:
+                states[eff] = factory_effect(eff)
     L = ['<REAPER_PROJECT 0.1 "7.0/win64" 0', '  TEMPO 120 4 4', '  SAMPLERATE 48000 0 0']
-    for tn, _ in cases:
+    for tn, _e, _r in cases:
         L += ['  <TRACK', '    NAME %s' % tn, '    <ITEM', '      POSITION 0', '      LENGTH 4',
               '      <SOURCE WAVE', '        FILE "noise.wav"', '      >', '    >', '  >']
     L += ['>']
@@ -83,12 +94,15 @@ def main():
     log = []
     with contextlib.redirect_stdout(io.StringIO()):
         p = convert.load(rpp, log)
-    for t, (tn, recs) in zip(p.tracks, cases):
+    for t, (tn, eff, recs) in zip(p.tracks, cases):
+        uid, comp, ctrl = states[eff]
         f = model.Fx()
-        f.name, f.uid, f.controller = name, uid, ctrl
+        f.name, f.uid, f.controller = eff, uid, ctrl
         f.component = with_records(comp, recs)
         t.fx = [f]
-    dst = os.path.join(out, name.replace(' ', '_') + '.cpr')
+    dst = os.path.join(out, ('batch' if name == '-' else name).replace(' ', '_') + '.cpr')
+    if os.path.exists(dst):
+        os.remove(dst)
     cpr_build.write(p, dst, donor=cpr_build.pick_donor(p), log=log)
     print(dst, len(cases), 'tracks')
 

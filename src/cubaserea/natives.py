@@ -228,6 +228,153 @@ CUBASE_TO_REAPER = {
 }
 
 
+# ---------------------------------------------------------------- EQs
+# Measured on Cubase 15 renders of noise through each EQ (tools/
+# cubase_fx_testbed.py, test/eqcal, 2026-10-02) and fitted with ReaEQ bands
+# (tools/fit_reaeq.py). A band measured at one setting scales with it:
+# its gain in dB in proportion, its frequency with the knob.
+def _reaeq(bands):
+    from . import chan_eq
+    return ('vst', 'ReaEQ', chan_eq.reaeq_data([b for b in bands if b]))
+
+
+def _bell(hz, gdb, bw):
+    return (8, 1, float(hz), db2lin(gdb), float(bw))
+
+
+def c_studioeq(r, p):
+    """StudioEQ: its low and high bands are the channel EQ's shelves and
+    cut (types 0/1/2/3 render as the channel EQ's 5/6/7/3, within 0.18 dB),
+    its two middle bands Frequency's bells (within 0.09 dB) - carried as
+    ReaEQ bands fitted to those curves."""
+    from . import chan_eq, freq_eq
+    g = _g(r)
+    out_bands, worst = [], 0.0
+    edge = []
+    if g('on1l', 1.0) > 0.5:
+        edge.append((0, {0: 5, 1: 6, 2: 7, 3: 3}.get(int(round(g('lftype'))), 5),
+                     g('gainlfl'), g('freqlfl', 100.0), g('qlfl', 1.0)))
+    if g('on4l', 1.0) > 0.5:
+        edge.append((3, {0: 5, 1: 6, 2: 7, 3: 3}.get(int(round(g('hftype'))), 5),
+                     g('gainhfl'), g('freqhfl', 10000.0), g('qhfl', 1.0)))
+    for b in edge:
+        if b[1] != 3 and abs(b[2]) < 1e-6:
+            continue
+        rb, err = chan_eq.to_reaeq([b])
+        out_bands += rb
+        worst = max(worst, err)
+    for on, f, gg, q in (('on2l', 'freqp1l', 'gainp1l', 'qp1l'), ('on3l', 'freqp2l', 'gainp2l', 'qp2l')):
+        if g(on, 1.0) > 0.5 and abs(g(gg)) > 1e-6:
+            hz = g(f, 1000.0)
+            Q = freq_eq.rbj_q_of(max(0.05, g(q, 1.0)), g(gg))
+            out_bands.append(_bell(hz, g(gg), freq_eq._reaeq_bw_of_rbj_q(Q, hz)))
+    ent = [_reaeq(out_bands)] if out_bands else []
+    if abs(g('outputl')) > 1e-6:
+        ent.append(('js', 'utility/volume', [stock.js_db(db2lin(g('outputl'))), 150.0]))
+    return (ent or [('js', 'utility/volume', [0.0, 150.0])]), \
+        'close (ReaEQ, within %.1f dB of StudioEQ)' % worst
+
+
+def c_djeq(r, p):
+    """DJ-Eq: a low shelf at 250 Hz, a bell at 1.5 kHz and a high shelf at
+    5 kHz (exact to 0.01 dB at +6), each with a kill: the low kill three
+    high passes, the high kill three low passes, the mid kill two deep
+    bells (within 1.3 dB of its -48 dB notch)."""
+    g = _g(r)
+    bands = []
+    if g('lowCutOn') > 0.5:
+        bands += [(4, 1, 173.7, 1.0, 2.449), (4, 1, 355.4, 1.0, 2.393), (4, 1, 30.3, 1.0, 1.834)]
+    elif abs(g('lowgain')) > 1e-6:
+        bands.append((0, 1, 249.7, db2lin(g('lowgain')), 1.395))
+    if g('midCutOn') > 0.5:
+        bands += [_bell(1019.0, -32.22, 3.081), _bell(1051.6, -16.13, 3.831)]
+    elif abs(g('midgain')) > 1e-6:
+        bands.append(_bell(1501.2, g('midgain'), 1.003))
+    if g('highCutOn') > 0.5:
+        bands += [(3, 1, 8463.6, 1.0, 1.929), (3, 1, 23000.0, 1.0, 0.219), (3, 1, 3039.8, 1.0, 2.128)]
+    elif abs(g('highgain')) > 1e-6:
+        bands.append((1, 1, 4999.1, db2lin(g('highgain')), 1.394))
+    return ([_reaeq(bands)] if bands else [('js', 'utility/volume', [0.0, 150.0])]), \
+        'close (ReaEQ, fitted to DJ-Eq renders)'
+
+
+GEQ10_HZ = (30.6, 63, 125, 250, 501.2, 1000, 2000, 4000, 8000, 16288)    # measured: 1, 5, 10
+GEQ30_HZ = (25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000,
+            1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000, 20000)
+
+
+def c_geq(r, p, hz, bw, full):
+    # full: the fitted bell's gain at the top of the slider, per band
+    """GEQ-10 / GEQ-30: a bell per slider (0.5 is flat, 1 the top of its
+    range, Range scaling it), the shape fitted at full boost: GEQ-10 bands
+    an octave wide (bw 0.5 .. 0.75, peak 12.2 .. 13.4 dB), GEQ-30 bands a
+    third (0.24, 13.5 dB) - within 1.3 dB."""
+    g = _g(r)
+    rng = g('gainrange', 1.0)
+    bands = []
+    for k, f in enumerate(hz, 1):
+        s = g('slider%d' % k, 0.5)
+        if abs(s - 0.5) < 1e-4:
+            continue
+        gdb = (s - 0.5) * 2.0 * full(k) * rng
+        if g('invert') > 0.5:
+            gdb = -gdb
+        bands.append(_bell(f, gdb, bw(k)))
+    ent = [_reaeq(bands)] if bands else []
+    o = g('output', 0.5)
+    if abs(o - 0.5) > 1e-4:
+        ent.append(('js', 'utility/volume', [stock.js_db(db2lin((o - 0.5) * 24.0)), 150.0]))
+    return (ent or [('js', 'utility/volume', [0.0, 150.0])]), \
+        'close (ReaEQ, a band per slider, fitted to the graphic EQ\'s renders)'
+
+
+def c_eqm5(r, p):
+    """EQ-M5: a low bell (boost x 0.64 dB per step), a mid cut (x 1.07) and
+    a high bell (x 0.63) - fitted within 0.04 dB at 5."""
+    g = _g(r)
+    bands = []
+    if g('boostlow') > 1e-6:
+        bands.append(_bell(g('freqlow', 500.0), 0.636 * g('boostlow'), 1.337))
+    if g('attenmid') > 1e-6:
+        bands.append(_bell(1.04 * g('freqmid', 2000.0), -1.068 * g('attenmid'), 2.446))
+    if g('boosthigh') > 1e-6:
+        bands.append(_bell(0.98 * g('freqhigh', 3000.0), 0.628 * g('boosthigh'), 0.654))
+    ent = [_reaeq(bands)] if bands else []
+    if abs(g('output')) > 1e-6:
+        ent.append(('js', 'utility/volume', [stock.js_db(db2lin(g('output'))), 150.0]))
+    return (ent or [('js', 'utility/volume', [0.0, 150.0])]), 'close (ReaEQ, fitted to EQ-M5 renders)'
+
+
+def c_eqp1a(r, p):
+    """EQ-P1A: the low boost a shelf with its corner at 5.7 x the knob's
+    frequency, the low cut a shelf at 11 x, the high boost a bell, the high
+    cut a shelf at 0.24 x - each fitted at 5 (0.04 .. 0.65 dB)."""
+    g = _g(r)
+    bands = []
+    if g('lowboost') > 1e-6:
+        bands.append((0, 1, 5.70 * g('freqboostlow', 100.0), db2lin(1.606 * g('lowboost')), 1.729))
+    if g('lowatten') > 1e-6:
+        bands.append((0, 1, 11.1 * g('freqboostlow', 100.0), db2lin(-1.582 * g('lowatten')), 1.298))
+    if g('highboost') > 1e-6:
+        bands.append(_bell(1.07 * g('freqboosthigh', 5000.0), 0.75 * g('highboost'),
+                           2.222 * max(0.1, g('bandwidth', 1.0))))
+    if g('highatten') > 1e-6:
+        bands.append((1, 1, 0.2434 * g('freqattenhigh', 8000.0), db2lin(-0.804 * g('highatten')), 1.348))
+    ent = [_reaeq(bands)] if bands else []
+    if abs(g('output')) > 1e-6:
+        ent.append(('js', 'utility/volume', [stock.js_db(db2lin(g('output'))), 150.0]))
+    return (ent or [('js', 'utility/volume', [0.0, 150.0])]), 'close (ReaEQ, fitted to EQ-P1A renders)'
+
+
+CUBASE_TO_REAPER.update({
+    'StudioEQ': c_studioeq, 'DJ-Eq': c_djeq, 'EQ-M5': c_eqm5, 'EQ-P1A': c_eqp1a,
+    'GEQ-10': lambda r, p: c_geq(r, p, GEQ10_HZ, lambda k: 0.5 + 0.254 * min(1.0, (k - 1) / 4.0)
+                                 - 0.063 * max(0.0, (k - 5) / 5.0),
+                                 lambda k: 12.17 + 1.24 * min(1.0, (k - 1) / 4.0) - 0.46 * max(0.0, (k - 5) / 5.0)),
+    'GEQ-30': lambda r, p: c_geq(r, p, GEQ30_HZ, lambda k: 0.24, lambda k: 13.49),
+})
+
+
 # ------------------------------------------------- REAPER -> Cubase
 def r_expander(sl, tempo):
     v = list(sl) + [0.0] * 7
@@ -259,6 +406,87 @@ REAPER_TO_CUBASE = {
     'JS:' + JS_EXPANDER: r_expander,
     'ReaXcomp': r_reaxcomp,
 }
+
+
+# --------------------------------------------- REAPER's JS EQs as ReaEQ
+# Stillwell's RBJ EQs are cookbook biquads (their source): a peak of Q 0.8
+# at fixed frequencies, high/low passes of Q 1/sqrt 2 (hpflpf) or 1 (the
+# 7-band's high pass) - ReaEQ bands exactly. LOSER's 3/4-band EQs split
+# with one-pole crossovers: the nearest shelves.
+RBJ4_F = ((40, 80, 160, 315, 500), (125, 250, 500, 1000, 2000), (315, 630, 1200, 2500, 5000),
+          (1600, 3200, 6400, 9000, 12000))
+RBJ7_F = (100, 200, 400, 800, 2500, 6000, 12000)
+
+
+def _pass_bw(Q, hz):
+    from . import freq_eq
+    return freq_eq._reaeq_bw_of_rbj_q(Q, hz)
+
+
+def js_eq_bands(path, sl):
+    """(ReaEQ bands, output gain dB) for one of REAPER's JS EQs, or None."""
+    from . import freq_eq
+    v = list(sl) + [0.0] * 16
+    if path == 'sstillwell/hpflpf':
+        b = []
+        if v[0] > 0:
+            b.append((4, 1, v[0], 1.0, _pass_bw(1 / math.sqrt(2), v[0])))
+        if v[1] < 22000:
+            b.append((3, 1, v[1], 1.0, _pass_bw(1 / math.sqrt(2), v[1])))
+        return b, v[2]
+    if path == 'sstillwell/rbj4eq':
+        b = []
+        for k in range(4):
+            hz = RBJ4_F[k][max(0, min(4, int(round(v[2 * k]))))]
+            if abs(v[2 * k + 1]) > 1e-6:
+                b.append((8, 1, float(hz), db2lin(v[2 * k + 1]), freq_eq._reaeq_bw_of_rbj_q(0.8, hz)))
+        return b, 0.0
+    if path == 'sstillwell/rbj7eq':
+        b = [(4, 1, max(10.0, v[0]), 1.0, _pass_bw(1.0, max(10.0, v[0])))] if v[0] > 10.5 else []
+        for k, hz in enumerate(RBJ7_F):
+            if abs(v[1 + k]) > 1e-6:
+                b.append((8, 1, float(hz), db2lin(v[1 + k]), freq_eq._reaeq_bw_of_rbj_q(0.8, hz)))
+        return b, 0.0
+    if path in ('loser/3BandEQ', 'loser/4BandEQ'):
+        if path == 'loser/3BandEQ':
+            lo, f1, mid, f2, hi, out = v[:6]
+            mids = [(mid, f1, f2)]
+        else:
+            lo, f1, lm, f2, hm, f3, hi, out = v[:8]
+            mids = [(lm, f1, f2), (hm, f2, f3)]
+            mid = lm
+        b = []
+        # the low and high bands relative to the middle, a broad shelf at
+        # each crossover; the middle level as output gain
+        if abs(lo - mid) > 1e-6:
+            b.append((0, 1, max(20.0, f1), db2lin(lo - mid), 2.5))
+        if path == 'loser/4BandEQ' and abs(hm - lm) > 1e-6:
+            b.append((1, 1, max(20.0, f2), db2lin(hm - lm), 2.5))
+        top = hm if path == 'loser/4BandEQ' else mid
+        if abs(hi - top) > 1e-6:
+            b.append((1, 1, max(20.0, f2 if path == 'loser/3BandEQ' else f3), db2lin(hi - top), 2.5))
+        return b, out + mid
+    return None
+
+
+def r_js_eq(path):
+    def fn(sl, tempo):
+        from . import freq_eq
+        got = js_eq_bands(path, sl)
+        if not got:
+            return None
+        bands, out = got
+        recs, worst = freq_eq.records_for(bands)
+        if not recs:
+            return None
+        rec = dict(recs[0])
+        rec['equalizerAoutput'] = out
+        return 'Frequency', rec, "close (Cubase Frequency, within %.1f dB of the JS EQ)" % worst
+    return fn
+
+
+for _p in ('sstillwell/hpflpf', 'sstillwell/rbj4eq', 'sstillwell/rbj7eq', 'loser/3BandEQ', 'loser/4BandEQ'):
+    REAPER_TO_CUBASE['JS:' + _p] = r_js_eq(_p)
 
 
 # --------------------------------------------------------- the hooks

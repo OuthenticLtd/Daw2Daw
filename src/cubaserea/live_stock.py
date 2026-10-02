@@ -936,3 +936,20 @@ REAPER_MAP['ReaXcomp'] = multiband
 LIVE_MAP['GlueCompressor'] = rev_glue
 LIVE_MAP['MultibandDynamics'] = rev_multiband
 JS_MAP = {'sstillwell/expander': expander_js}
+
+
+def _js_eq(path):
+    def fn(w, sliders):
+        from . import natives
+        got = natives.js_eq_bands(path, sliders)
+        if not got:
+            return None
+        bands, out = got
+        d, how = eq8(w, bands)
+        _put(d, 'GlobalGain', out)
+        return d, 'close (Live EQ Eight, band for band)'
+    return fn
+
+
+for _p in ('sstillwell/hpflpf', 'sstillwell/rbj4eq', 'sstillwell/rbj7eq', 'loser/3BandEQ', 'loser/4BandEQ'):
+    JS_MAP[_p] = _js_eq(_p)

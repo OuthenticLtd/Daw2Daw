@@ -27,6 +27,17 @@ L = stock.db2lin
 
 # family -> [(case name, 'cubase', effect name, records) | (name, 'reaper', [entries])]
 CASES = {
+    'eq': [
+        ('c_studioeq', 'cubase', 'StudioEQ', {'gainlfl': 4.0, 'freqlfl': 120.0, 'gainp1l': -3.0, 'qp1l': 2.0,
+                                             'freqp1l': 800.0, 'hftype': 3.0, 'freqhfl': 9000.0}),
+        ('c_djeq', 'cubase', 'DJ-Eq', {'lowgain': 4.0, 'highgain': -6.0}),
+        ('c_geq10', 'cubase', 'GEQ-10', {'slider3': 0.8, 'slider7': 0.3}),
+        ('c_eqm5', 'cubase', 'EQ-M5', {'boostlow': 4.0, 'attenmid': 3.0}),
+        ('c_eqp1a', 'cubase', 'EQ-P1A', {'lowboost': 4.0, 'highatten': 3.0}),
+        ('r_hpflpf', 'reaper', [('js', 'sstillwell/hpflpf', [80.0, 12000.0, -2.0])]),
+        ('r_rbj7', 'reaper', [('js', 'sstillwell/rbj7eq', [40.0, 3.0, 0, -2.0, 0, 4.0, 0, -3.0])]),
+        ('r_3band', 'reaper', [('js', 'loser/3BandEQ', [4.0, 200.0, 0.0, 2500.0, -3.0, 0.0])]),
+    ],
     'dynamics': [
         ('c_expander', 'cubase', 'Expander', {'threshold': -30.0, 'ratio': 3.0, 'attack': 4.0, 'release': 80.0}),
         ('c_deesser', 'cubase', 'DeEsser', {'threshold': -28.0, 'autothreshold': 0.0, 'reduction': 6.0,
@@ -104,7 +115,15 @@ def cubase_fx(path):
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         p = cpr_read.read(path)
     p = p[0] if isinstance(p, tuple) else p
-    return {t.name: t.fx for t in p.tracks}
+    out = {}
+    for t in p.tracks:
+        fx = list(t.fx)
+        if getattr(t, 'chan_eq', None):
+            ce = model.Fx()
+            ce.name = 'channel EQ (%d bands)' % len(t.chan_eq)
+            fx.append(ce)
+        out[t.name] = fx
+    return out
 
 
 def reaper_fx(path):
@@ -122,6 +141,8 @@ def reaper_fx(path):
                 got.append((f.name, getattr(f, 'raw_state', None) or natives.js_sliders(f)))
             else:
                 got.append((f.name, None))
+        if getattr(t, 'chan_eq', None):
+            got.append(('channel EQ', None))
         out[t.name] = got
     return out
 
