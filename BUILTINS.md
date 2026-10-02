@@ -29,6 +29,8 @@ How close a mapping is, as the conversion log says it:
 | EQ-M5 / EQ-P1A | ReaEQ | EQ Eight | measured, within 0.7 dB |
 | - | JS RBJ high/low pass, 4- and 7-band | EQ Eight | exact |
 | - | JS LOSER 3/4-band | EQ Eight | close |
+| MorphFilter | ReaEQ (6..24 dB passes) | EQ Eight | measured, within 0.25 dB |
+| - | ReaEQ | Channel EQ, EQ Three (to REAPER) | measured, within 0.5 dB (EQ Three mid 0.9) |
 | WahWah | JS Wah-Wah | Auto Filter (band pass) | approximate |
 | - | - | Auto Filter (static) | approximate |
 
@@ -40,7 +42,7 @@ How close a mapping is, as the conversion log says it:
 | Limiter / Brickwall Limiter | ReaLimit | Limiter | close |
 | Gate | ReaGate | Gate | close |
 | Expander | JS Downward Expander | Compressor (Expand) | close (Live: ratio to 1:2) |
-| DeEsser | ReaComp (detector band) | Compressor (sidechain EQ) | close |
+| DeEsser | ReaComp (detector band) | Compressor (sidechain EQ, band pass) | close; Live's side chain EQ modes measured |
 | Maximizer / Raiser | ReaLimit | Limiter | approximate / close |
 | VoxComp, Black Valve, Tube, Vintage | ReaComp | Compressor | approximate |
 | VSTDynamics | ReaGate + ReaComp + ReaLimit | Gate + Compressor + Limiter | close |
@@ -83,8 +85,9 @@ DAW first:
 
 - **Cubase:** Vocoder, VocalChain, Pitch Correct, FX Modulator, and its
   legacy VST2-era effects (Bitcrusher, Chopper, DaTube, Grungelizer,
-  Metalizer, RingModulator, StepFilter, Tranceformer), AutoFilter,
-  DualFilter, MorphFilter and ToneBooster (the last four are being measured).
+  Metalizer, RingModulator, StepFilter, Tranceformer), AutoFilter (its cutoff
+  is not in its saved state), DualFilter (not a standard filter shape) and
+  ToneBooster (being measured).
 - **Live:** Corpus, Resonators, Vocoder, Beat Repeat, Looper, Spectral
   Resonator, Spectral Time, Erosion, Max for Live devices.
 - Meters and tuners (SuperVision, Tuner, Spectrum) make no sound and are

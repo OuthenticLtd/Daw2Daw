@@ -90,9 +90,8 @@ def compressor(w, data):
     # RMS window: Live's envelope follower is peak (0) or RMS (1), not a time
     _set(d, 'Model', 1 if 100.0 * (v[13] or 0) >= 1.0 else 0)
     # ReaComp's detector filters (bytes 32/36, Hz / 20000) are Live's side
-    # chain EQ: a band between them is its band pass (mode 1 - Ableton's
-    # own De-esser preset), a high pass alone mode 5 (its Glue "sidechain
-    # EQ" presets), a low pass alone mode 3
+    # chain EQ, its modes measured (Live renders with Side Listen on): 0 low
+    # shelf, 1 bell, 2 high shelf, 3 low pass, 4 band pass, 5 high pass
     lp = 20000.0 * (_f32(data, 32) if len(data) >= 36 else 1.0)
     hp = 20000.0 * (_f32(data, 36) if len(data) >= 40 else 0.0)
     sc = d.find('.//SideChainEq')
@@ -100,7 +99,7 @@ def compressor(w, data):
         _set(sc, 'On', True)
         if hp > 20.0 and lp < 19000.0:
             f0 = math.sqrt(hp * lp)
-            _set(sc, 'Mode', 1)
+            _set(sc, 'Mode', 4)
             _put(sc, 'Freq', f0)
             _put(sc, 'Q', max(0.1, f0 / max(1.0, lp - hp)))
         elif hp > 20.0:
@@ -539,7 +538,8 @@ def rev_compressor(d, tempo):
     sc = d.find('.//SideChainEq')
     if sc is not None and _m(sc, 'On', False):
         mode, f0, q = int(_m(sc, 'Mode', 4)), _m(sc, 'Freq', 1000.0), max(0.1, _m(sc, 'Q', 0.71))
-        if mode == 1:
+        if mode in (1, 4):
+            # a band pass, or a bell (a detector that hears one band more)
             half = f0 / (2.0 * q)
             hp = max(20.0, math.sqrt(half * half + f0 * f0) - half)
             lp = min(20000.0, hp + f0 / q)
@@ -1383,3 +1383,64 @@ UNMATCHED_LIVE = {'Corpus': 'a physical-model resonator', 'Resonator': 'a resona
                   'SpectralResonator': 'a spectral resonator', 'SpectralTime': 'a spectral freeze/delay',
                   'Erosion': 'a noise modulator', 'FrequencyShifter': 'a frequency shifter',
                   'MxDeviceAudioEffect': 'a Max for Live device', 'ProxyAudioEffectDevice': 'an external effect'}
+
+
+# ----------------------------------- Live's other EQs (measured, livecal)
+# Fitted to Live 11 renders of noise (test/livecal, 2026-10-02) within
+# 0.1 .. 0.5 dB with ReaEQ bands.
+def rev_channeleq(d, tempo):
+    """Channel EQ -> ReaEQ: its low shelf (corner 135 Hz boosting, 193 Hz
+    cutting), its bell (fixed width, bw 2.4), its high shelf (2.86 kHz),
+    its low cut, and its output gain."""
+    from . import chan_eq
+    b = []
+    if _m(d, 'HighpassOn', False):
+        b.append((4, 1, 14.8, 1.0, 5.036))
+    lo = _m(d, 'LowShelfGain', 1.0)
+    if abs(lo - 1.0) > 1e-4:
+        b.append((0, 1, 135.0 if lo > 1 else 193.0, lo, 1.076 if lo > 1 else 1.201))
+    mid = _m(d, 'MidGain', 1.0)
+    if abs(mid - 1.0) > 1e-4:
+        b.append((8, 1, _m(d, 'MidFrequency', 1000.0), mid, 2.407))
+    hi = _m(d, 'HighShelfGain', 1.0)
+    if abs(hi - 1.0) > 1e-4:
+        b.append((1, 1, 2860.6, hi, 1.111))
+    ent = [('vst', 'ReaEQ', chan_eq.reaeq_data(b))] if b else []
+    og = _m(d, 'Gain', 1.0)
+    if abs(og - 1.0) > 1e-4:
+        ent.append(('js', 'utility/volume', [stock.js_db(og), 150.0]))
+    return (ent or [('js', 'utility/volume', [0.0, 150.0])]), 'close (ReaEQ, fitted to Channel EQ renders)'
+
+
+def rev_eq3(d, tempo):
+    """EQ Three -> ReaEQ: the low and high bands against the middle as
+    shelves (1.07 x Low, 0.91 x High), the middle as the level; a band
+    switched off (or at its floor) is a kill - two steep passes, four on
+    the 48 dB slope."""
+    from . import chan_eq
+    fl, fh = _m(d, 'FreqLo', 250.0), _m(d, 'FreqHi', 2500.0)
+    gl = _m(d, 'GainLo', 1.0) if _m(d, 'LowOn', True) else 0.0
+    gm = _m(d, 'GainMid', 1.0) if _m(d, 'MidOn', True) else 0.0
+    gh = _m(d, 'GainHi', 1.0) if _m(d, 'HighOn', True) else 0.0
+    steep = int(_m(d, 'Slope', 0)) == 1
+    b = []
+    ref = gm if gm > 1e-3 else 1.0
+    if gl < 1e-3:
+        b += [(4, 1, 1.124 * fl, 1.0, 1.79), (4, 1, 0.873 * fl, 1.0, 2.007)] * (2 if steep else 1)
+    elif abs(gl / ref - 1.0) > 1e-4:
+        b.append((0, 1, 1.066 * fl, gl / ref, 0.971))
+    if gh < 1e-3:
+        b += ([(3, 1, 1.005 * fh, 1.0, 1.372), (3, 1, 1.619 * fh, 1.0, 1.328), (3, 1, 0.947 * fh, 1.0, 0.72),
+               (3, 1, 0.530 * fh, 1.0, 2.13)] if steep else [(3, 1, 0.89 * fh, 1.0, 1.79), (3, 1, 1.145 * fh, 1.0, 2.007)])
+    elif abs(gh / ref - 1.0) > 1e-4:
+        b.append((1, 1, 0.913 * fh, gh / ref, 0.951))
+    ent = [('vst', 'ReaEQ', chan_eq.reaeq_data(b))] if b else []
+    if gm < 1e-3:
+        d0 = [('js', 'utility/volume', [-150.0, 150.0])]
+        return d0, 'approximate (its middle band killed: the whole signal here)'
+    if abs(gm - 1.0) > 1e-4:
+        ent.append(('js', 'utility/volume', [stock.js_db(gm), 150.0]))
+    return (ent or [('js', 'utility/volume', [0.0, 150.0])]), 'close (ReaEQ, fitted to EQ Three renders)'
+
+
+LIVE_MAP.update({'ChannelEq': rev_channeleq, 'FilterEQ3': rev_eq3})

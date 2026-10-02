@@ -310,7 +310,7 @@ def c_geq(r, p, hz, bw, full):
     an octave wide (bw 0.5 .. 0.75, peak 12.2 .. 13.4 dB), GEQ-30 bands a
     third (0.24, 13.5 dB) - within 1.3 dB."""
     g = _g(r)
-    rng = g('gainrange', 1.0)
+    rng = g('gainrange', 1.0)     # renders: Range 0.5 is half the gain
     bands = []
     for k, f in enumerate(hz, 1):
         s = g('slider%d' % k, 0.5)
@@ -970,10 +970,43 @@ CUBASE_TO_REAPER.update({
     'Squasher': c_squasher, 'MultibandEnvelopeShaper': c_envshaper_mb, 'UltraShaper': c_envshaper_mb,
 })
 
+def c_morphfilter(r, p):
+    """MorphFilter: a low pass of type A's slope (0..3: 6, 12, 18, 24 dB,
+    sections of Q 0.5 - fitted within 0.1 dB at 1 kHz) morphing into a high
+    pass of type B's; carried as whichever Morph leans to, Resonance
+    raising the last section's Q (80 %% renders +13 dB)."""
+    g = _g(r)
+    m = g('morph', 0.0)
+    hp = m >= 50.0
+    ty = int(round(g('typeFilterB' if hp else 'typeFilterA', 0.0)))
+    hz = max(20.0, g('lofreq', 1000.0))
+    order = (1, 2, 3, 4)[max(0, min(3, ty))]
+    res = max(0.0, min(1.0, g('resonance', 0.0) / 100.0))
+    bands = []
+    secs = (order + 1) // 2
+    for k in range(secs):
+        Q = 0.5 if k < secs - 1 else 0.5 + 6.0 * res * res
+        if order % 2 == 1 and k == 0:
+            # ReaEQ has no first-order pass: a 6 dB high pass is a very wide
+            # one far below (0.062 x the corner, bw 8 - within 0.2 dB of the
+            # render), a 6 dB low pass a shelf 55 dB deep 15.35 x above
+            # (within 0.01 dB of a first-order low pass)
+            if hp:
+                bands.append((4, 1, max(10.0, hz * 0.0617), 1.0, 8.0))
+            else:
+                bands.append((1, 1, min(23000.0, hz * 15.35), db2lin(-55.24), 1.413))
+            continue
+        bands.append((4 if hp else 3, 1, hz, 1.0, _pass_bw(Q, hz)))
+    note = '' if m in (0.0, 100.0) else '; its morph between them is not carried'
+    return [_reaeq(bands)], 'close (ReaEQ, a %d dB %s pass%s)' % (6 * order, 'high' if hp else 'low', note)
+
+
+CUBASE_TO_REAPER['MorphFilter'] = c_morphfilter
+
 # Cubase's own effects with nothing like them elsewhere: left out, said so
 UNMATCHED_CUBASE = ('Vocoder', 'VocalChain', 'Pitch Correct', 'FX Modulator', 'Mix6To2', 'MixerDelay',
                     'MIDI Gate', 'ModScripter', 'Step Modulator', 'Grungelizer', 'Metalizer', 'Tranceformer',
-                    'RingModulator', 'Chopper', 'StepFilter', 'Bitcrusher', 'DaTube', 'MorphFilter',
+                    'RingModulator', 'Chopper', 'StepFilter', 'Bitcrusher', 'DaTube',
                     'DualFilter', 'AutoFilter', 'ToneBooster')
 
 
