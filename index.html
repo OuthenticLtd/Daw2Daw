@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Daw2Daw</title>
+<meta name="description" content="Open your Cubase, REAPER or Ableton Live project in another DAW. Tracks, clips, mix, automation and effects, native and editable. Runs in your browser; nothing is uploaded.">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" type="image/svg+xml" href="favicon.svg?v=3">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png?v=3">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=3">
+<meta name="theme-color" content="#0a0a0b" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f3f2ee" media="(prefers-color-scheme: light)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #0a0a0b; --bg2: #121214; --bg3: #19191c;
+    --ink: #f4f3ee; --ink2: #b9b8b1; --mute: #75746e;
+    --line: rgba(244, 243, 238, .13); --line2: rgba(244, 243, 238, .06);
+    --acc: #f2b63a; --acc-text: #f2b63a; --acc-ink: #171000; --acc-soft: rgba(242, 182, 58, .14);
+    --ok: #62d08c; --bad: #ff6b5c;
+    --sans: "Hanken Grotesk", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --gut: clamp(20px, 4vw, 64px); --ease: cubic-bezier(.22, .8, .2, 1);
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f3f2ee; --bg2: #ffffff; --bg3: #eceae4;
+      --ink: #141413; --ink2: #4b4a45; --mute: #85847d;
+      --line: rgba(20, 20, 19, .14); --line2: rgba(20, 20, 19, .06);
+      --acc: #e0a51f; --acc-text: #8a5f00; --acc-ink: #1a1200; --acc-soft: rgba(224, 165, 31, .18);
+      --ok: #1f8a4c; --bad: #c9372c;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 400 17px/1.5 var(--sans);
+         -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; overflow-x: hidden; }
+  a { color: inherit; text-decoration: none; }
+  p a, .fine a { text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+  p a:hover, .fine a:hover { text-decoration-color: currentColor; }
+  :focus-visible { outline: 2px solid var(--acc); outline-offset: 3px; }
+  ::selection { background: var(--acc); color: var(--acc-ink); }
+  button { font: inherit; color: inherit; }
+  .mono { font-family: var(--mono); font-size: 12px; letter-spacing: .02em; }
+  .cap { font: 500 11px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--mute); }
+  .sr { position: absolute !important; width: 1px; height: 1px; margin: 0; padding: 0; border: 0; opacity: 0; overflow: hidden; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 0 var(--gut); }
+
+  /* ---------------------------------------------------------------- top */
+  .top { position: sticky; top: 0; z-index: 20; height: 64px; display: flex; align-items: center; justify-content: space-between;
+         padding: 0 var(--gut); background: color-mix(in srgb, var(--bg) 82%, transparent);
+         -webkit-backdrop-filter: saturate(140%) blur(14px); backdrop-filter: saturate(140%) blur(14px); }
+  .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; letter-spacing: -.01em; }
+  .brand svg { width: 22px; height: 22px; }
+  .brand svg .n { fill: var(--ink); } .brand svg .h { stroke: var(--ink); } .brand svg .a { fill: var(--acc); }
+  .engine { display: inline-flex; align-items: center; gap: 10px; color: var(--mute); }
+  .engine .seg { display: inline-flex; gap: 3px; }
+  .engine .seg i { width: 14px; height: 3px; border-radius: 2px; background: var(--line); transition: background .4s; }
+  .engine .seg i.on { background: var(--ink2); }
+  .engine .seg i.go { background: var(--ink2); animation: blink 1s steps(2) infinite; }
+  .engine.ready { color: var(--ink2); } .engine.ready .seg i { background: var(--acc); }
+  @keyframes blink { 50% { opacity: .2; } }
+
+  /* --------------------------------------------------------------- hero */
+  .hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(32px, 5vw, 80px); align-items: start;
+          min-height: calc(100svh - 64px); padding: clamp(24px, 4vh, 56px) 0 clamp(40px, 6vh, 80px); }
+  .copy { padding-top: clamp(0px, 9vh, 96px); }
+  .copy { max-width: 560px; }
+  .eyebrow { margin: 0 0 22px; }
+  h1 { margin: 0; font-weight: 300; font-size: clamp(42px, 5.4vw, 78px); line-height: 1.0; letter-spacing: -.035em; }
+  h1 b { font-weight: 500; }
+  .lede { margin: 26px 0 0; font-size: clamp(17px, 1.35vw, 20px); line-height: 1.5; color: var(--ink2); max-width: 32em; text-wrap: pretty; }
+  .lede strong { color: var(--ink); font-weight: 500; }
+  .facts { list-style: none; margin: 40px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .facts li { border-top: 1px solid var(--line); padding-top: 12px; font-size: 14px; color: var(--mute); line-height: 1.45; }
+  .facts li b { display: block; color: var(--ink); font-weight: 500; margin-bottom: 2px; }
+
+  .next { margin-top: 36px; display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+  .next ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 22px; flex-wrap: wrap; }
+  .next li { display: inline-flex; align-items: center; gap: 9px; font-size: 14px; color: var(--mute); }
+  .next img { width: 22px; height: 22px; object-fit: contain; filter: grayscale(1); opacity: .55; transition: filter .4s, opacity .4s; }
+  .next li:hover img { filter: none; opacity: 1; }
+
+  /* the device: three DAWs around your project */
+  .devicecol { justify-self: center; width: 100%; max-width: 600px; }
+  .device { position: relative; width: 100%; aspect-ratio: 1; container-type: inline-size; user-select: none; }
+  .device::before { content: ""; position: absolute; inset: -10%; border-radius: 50%; pointer-events: none;
+    background: radial-gradient(circle at 50% 50%, var(--acc-soft) 0%, transparent 58%); opacity: .45; transition: opacity .8s; }
+  @media (prefers-color-scheme: light) { .device::before { opacity: .3; } }
+  .device[data-state="busy"]::before, .device[data-state="done"]::before { opacity: .9 !important; }
+  .wires { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .wires .ring { fill: none; stroke: var(--line); stroke-width: .3; }
+  .wires .spoke { stroke: var(--line); stroke-width: .35; }
+  .wires .flow { stroke: var(--acc); stroke-width: .6; stroke-linecap: round; fill: none; opacity: 0; }
+  .wires .arc { fill: none; stroke: var(--acc); stroke-width: .7; stroke-linecap: round; opacity: 0; transform: rotate(-90deg); transform-origin: 60px 60px; }
+  .wires .dot { fill: var(--acc); opacity: 0; } .wires .halo { fill: var(--acc); opacity: 0; }
+
+  .node { position: absolute; left: calc(var(--x) / 120 * 100%); top: calc(var(--y) / 120 * 100%); transform: translate(-50%, -50%);
+          width: 16.667%; aspect-ratio: 1; border-radius: 50%; border: 1px solid var(--line); background: var(--bg2); padding: 0;
+          display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .35cqw; cursor: default;
+          transition: border-color .35s, background .35s, color .35s, box-shadow .35s, transform .35s var(--ease); -webkit-tap-highlight-color: transparent; }
+  .node .ico { width: 34%; height: 34%; object-fit: contain; margin-bottom: .6cqw; pointer-events: none;
+              filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .25)); transition: transform .35s var(--ease); }
+  .node.dst:hover .ico { transform: translateY(-2%); }
+  .node b { font-weight: 500; font-size: max(11px, 2.4cqw); letter-spacing: -.01em; line-height: 1; }
+  .node small { font: 400 max(9px, 1.7cqw)/1 var(--mono); color: var(--mute); letter-spacing: .02em; }
+  .node .tag { position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; color: var(--acc-text);
+               font: 500 max(9px, 1.6cqw)/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; opacity: 0; transition: opacity .35s; }
+  .node[data-daw="cubase"] .tag { bottom: calc(100% + 1.6cqw); } .node:not([data-daw="cubase"]) .tag { top: calc(100% + 1.6cqw); }
+  .node.src { border-color: var(--acc); box-shadow: 0 0 0 .7cqw var(--acc-soft); }
+  .node.src .tag, .node.to .tag { opacity: 1; }
+  .node.dst { cursor: pointer; }
+  .node.dst:hover { border-color: var(--ink2); background: var(--bg3); }
+  .node.to { border-color: var(--acc); }
+  .node.to:not(.lit)::after { content: ""; position: absolute; inset: -.9cqw; border-radius: 50%; border: 1px dashed var(--acc); opacity: .7; }
+  .node.lit { background: var(--acc); border-color: var(--acc); color: var(--acc-ink); }
+  .node.lit small { color: var(--acc-ink); opacity: .7; }
+  .node.flash { border-color: var(--acc); box-shadow: 0 0 0 .7cqw var(--acc-soft), inset 0 0 0 100cqw var(--acc-soft); }
+  .node.lit .tag { opacity: 1; }
+  .node.dim { opacity: .45; }
+
+  .hub { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 43.333%; aspect-ratio: 1; border-radius: 50%;
+         border: 1px solid var(--line); background: var(--bg2); overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; text-align: center;
+         transition: border-color .3s, box-shadow .3s; }
+  .device.over .hub { border-color: var(--acc); border-style: dashed; box-shadow: 0 0 0 1.4cqw var(--acc-soft); }
+  .device.over .node { opacity: .5; }
+  .h { display: none; flex-direction: column; align-items: center; justify-content: center; gap: 1.2cqw; width: 78%; min-width: 0; padding: 0; }
+  .device[data-state="boot"] .h-boot, .device[data-state="empty"] .h-empty, .device[data-state="loaded"] .h-loaded,
+  .device[data-state="busy"] .h-busy, .device[data-state="done"] .h-done, .device[data-state="failed"] .h-failed,
+  .device[data-state="reading"] .h-reading { display: flex; }
+  .h .t { font-weight: 500; font-size: max(13px, 2.8cqw); letter-spacing: -.01em; line-height: 1.15; }
+  .h .s { font-size: max(11px, 2.1cqw); color: var(--mute); line-height: 1.35; margin: 0; text-wrap: balance; }
+  .h .s.mono, .h .m { font-family: var(--mono); font-size: max(9px, 1.75cqw); letter-spacing: .02em; color: var(--mute); }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 999px; border: 1px solid var(--line);
+         background: transparent; padding: 0 2.6cqw; height: max(30px, 6cqw); font-size: max(12px, 2.2cqw); font-weight: 500; cursor: pointer;
+         white-space: nowrap; transition: background .25s, border-color .25s, color .25s, transform .15s; text-decoration: none; }
+  .btn:hover { border-color: var(--ink2); }
+  .btn:active { transform: translateY(1px); }
+  .btn.primary { background: var(--acc); border-color: var(--acc); color: var(--acc-ink); }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.primary:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 1.4cqw; justify-content: center; flex-wrap: wrap; }
+  .spin { width: 4cqw; height: 4cqw; border-radius: 50%; border: 1px solid var(--line); border-top-color: var(--acc); animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .pname { font-weight: 500; font-size: max(13px, 2.6cqw); letter-spacing: -.01em; line-height: 1.15; max-width: 100%;
+           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #mini { display: block; width: 100%; height: 8cqw; }
+  .pct { font-weight: 300; font-size: 11cqw; line-height: 1; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+  .pct i { font-style: normal; font-size: .4em; color: var(--mute); letter-spacing: 0; margin-left: .1em; }
+  .stage { width: 100%; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tick { width: 5cqw; height: 5cqw; }
+  .tick path { fill: none; stroke: var(--acc); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .h-failed .t { color: var(--bad); }
+
+  /* beneath the device */
+  #status { margin: 22px 0 0; min-height: 1.5em; text-align: center; font-size: 15px; color: var(--ink2); text-wrap: balance; }
+  #status.ok { color: var(--ok); } #status.bad { color: var(--bad); }
+  #status.working::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); margin: 0 9px 2px 0; animation: blink 1s steps(2) infinite; }
+  .opts { margin: 14px 0 0; display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 8px 22px; color: var(--mute); font-size: 13px; }
+  .opts label { display: inline-flex; align-items: center; gap: 8px; }
+  .opts select { font: inherit; color: var(--ink2); background: transparent; border: 0; border-bottom: 1px solid var(--line); padding: 2px 0; max-width: 260px; cursor: pointer; }
+  .opts select:hover { border-color: var(--ink2); }
+  .link { background: none; border: 0; padding: 0; color: var(--mute); cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+  .link:hover { color: var(--ink); }
+  #result { display: none; margin: 18px auto 0; max-width: 520px; font-size: 14px; color: var(--mute); text-align: center; }
+  #result .hint { margin: 0; } #result .hint strong { color: var(--ink2); font-weight: 500; }
+  #result .warn { margin: 12px 0 0; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent); border-radius: 12px; color: var(--ink2); text-align: left; }
+  #logwrap { margin: 18px auto 0; max-width: 600px; }
+  #logwrap summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 8px; color: var(--mute); }
+  #logwrap summary::-webkit-details-marker { display: none; }
+  #logwrap summary::before { content: "+"; font-family: var(--mono); width: 12px; } #logwrap[open] summary::before { content: "−"; }
+  #log { margin: 10px 0 0; max-height: 280px; overflow: auto; padding: 14px 16px; border-radius: 12px; background: var(--bg3); border: 1px solid var(--line2);
+         font: 11.5px/1.5 var(--mono); color: var(--ink2); white-space: pre-wrap; word-break: break-word; }
+
+  /* ----------------------------------------------------------- sections */
+  .sec { border-top: 1px solid var(--line); padding: clamp(56px, 8vh, 110px) 0; }
+  .sec-head { display: grid; grid-template-columns: 1fr 2fr; gap: 24px 48px; margin-bottom: clamp(32px, 5vh, 56px); align-items: end; }
+  .sec h2 { margin: 0; font-weight: 300; font-size: clamp(30px, 3.4vw, 46px); letter-spacing: -.03em; line-height: 1.05; text-wrap: balance; }
+  .sec h2 b { font-weight: 500; }
+  .sec-head p { margin: 0; color: var(--ink2); max-width: 40em; text-wrap: pretty; }
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; counter-reset: s; }
+  .steps li { border-top: 1px solid var(--line); padding-top: 18px; }
+  .steps .n { font: 500 12px/1 var(--mono); color: var(--acc-text); letter-spacing: .12em; }
+  .steps h3 { margin: 14px 0 8px; font-weight: 500; font-size: 20px; letter-spacing: -.015em; }
+  .steps p { margin: 0; color: var(--ink2); font-size: 15.5px; line-height: 1.55; text-wrap: pretty; }
+  .figure { margin: 0 0 14px; height: 72px; display: flex; align-items: center; }
+  .figure svg { width: 100%; height: 100%; overflow: visible; }
+  .figure .l { stroke: var(--line); stroke-width: 1; fill: none; }
+  .figure .k { stroke: var(--ink2); stroke-width: 1.2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .figure .a { stroke: var(--acc); stroke-width: 1.4; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .figure .af { fill: var(--acc); } .figure .kf { fill: var(--ink2); }
+  .figure text { font: 500 9px var(--mono); fill: var(--mute); letter-spacing: .1em; }
+
+  .cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; }
+  .cols > div { border-top: 1px solid var(--line); padding-top: 18px; }
+  .cols h3 { margin: 0 0 12px; font-weight: 500; font-size: 17px; letter-spacing: -.01em; }
+  .cols ul { list-style: none; margin: 0; padding: 0; }
+  .cols li { padding: 7px 0; border-bottom: 1px solid var(--line2); font-size: 15px; color: var(--ink2); display: flex; justify-content: space-between; gap: 16px; }
+  .cols li span + span { color: var(--mute); font: 400 11px/1.6 var(--mono); text-align: right; white-space: nowrap; }
+  .proofline { margin: 44px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 24px 36px; align-items: center; padding: 26px 0 0; border-top: 1px solid var(--line); }
+  .proofline .big { display: flex; flex-direction: column; gap: 10px; font-weight: 300; font-size: clamp(40px, 5vw, 64px); letter-spacing: -.04em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .proofline .big .cap { letter-spacing: .12em; max-width: 12em; line-height: 1.5; }
+  .proofline h3 { margin: 0 0 8px; font-weight: 500; font-size: 17px; letter-spacing: -.01em; }
+  .proofline .big i { font-style: normal; font-size: .4em; color: var(--mute); letter-spacing: 0; margin-left: .15em; }
+  .proofline p { margin: 0; color: var(--ink2); max-width: 52em; text-wrap: pretty; }
+  details.limits { margin-top: 40px; border-top: 1px solid var(--line); }
+  details.limits summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; padding: 18px 0; font-size: 17px; font-weight: 500; }
+  details.limits summary::-webkit-details-marker { display: none; }
+  details.limits summary::after { content: "+"; font: 300 26px/1 var(--mono); color: var(--mute); transition: transform .3s var(--ease); }
+  details.limits[open] summary::after { transform: rotate(45deg); }
+  details.limits ul { margin: 0 0 24px; padding: 0; list-style: none; columns: 2; column-gap: 40px; }
+  details.limits li { break-inside: avoid; padding: 8px 0; border-bottom: 1px solid var(--line2); font-size: 14.5px; color: var(--ink2); line-height: 1.5; }
+  details.limits li b { color: var(--ink); font-weight: 500; }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; }
+  footer .wrap { display: grid; grid-template-columns: 1fr 2fr; gap: 24px 48px; align-items: start; }
+  .fine { margin: 0; color: var(--mute); font-size: 13px; line-height: 1.6; }
+  .fine + .fine { margin-top: 8px; }
+  footer .brand { font-size: 15px; }
+  footer nav { margin-top: 12px; display: flex; gap: 18px; font-size: 13px; color: var(--mute); }
+  footer nav a:hover { color: var(--ink); }
+
+  /* ------------------------------------------------------------ narrow */
+  @media (max-width: 960px) {
+    .hero { grid-template-columns: 1fr; min-height: 0; gap: 40px; padding-top: 32px; }
+    .copy { max-width: none; }
+    .devicecol { max-width: 520px; }
+    .sec-head, footer .wrap { grid-template-columns: 1fr; }
+    .steps, .cols { grid-template-columns: 1fr; gap: 24px; }
+    details.limits ul { columns: 1; }
+  }
+  @media (max-width: 560px) {
+    body { font-size: 16px; }
+    .facts { grid-template-columns: 1fr; gap: 12px; }
+    .proofline { grid-template-columns: 1fr; }
+    .engine .txt { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .engine .seg i.go, #status.working::before { animation: none; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#" aria-label="Daw2Daw">
+    <svg viewBox="0 0 64 64" aria-hidden="true"><circle class="h" cx="32" cy="34" r="9" fill="none" stroke-width="3"/><path class="h" d="M32 25v-7M39.8 38.5l6-3.5M24.2 38.5l-6-3.5" stroke-width="3" stroke-linecap="round"/><circle class="a" cx="32" cy="13" r="5"/><circle class="n" cx="50.2" cy="44.5" r="5"/><circle class="n" cx="13.8" cy="44.5" r="5"/></svg>
+    Daw2Daw
+  </a>
+  <div class="engine cap" id="engine" title="The converter runs in this page: Python, ffmpeg and the converter load once, then stay cached"><span class="txt" id="engineTxt">Starting</span><span class="seg" aria-hidden="true"><i></i><i></i><i></i></span></div>
+</header>
+
+<main>
+<section class="hero wrap">
+  <div class="copy">
+    <p class="eyebrow cap">Cubase · REAPER · Ableton Live</p>
+    <h1>Your project,<br><b>in another DAW.</b></h1>
+    <p class="lede">Daw2Daw rewrites a Cubase, REAPER or Ableton Live project in the format of another. Tracks, clips, fades, comps, automation and effects arrive <strong>native and editable</strong>, not bounced. It runs in your browser. <strong>Nothing is uploaded.</strong></p>
+    <ul class="facts">
+      <li><b>Every direction</b>Three DAWs, six ways across.</li>
+      <li><b>Nothing printed</b>Native tracks and effects, settings carried.</li>
+      <li><b>Nothing leaves</b>The converter runs in this page.</li>
+    </ul>
+    <div class="next">
+      <span class="cap">Coming next</span>
+      <ul>
+        <li><img src="icons/protools.svg" alt="" draggable="false">Pro Tools</li>
+        <li><img src="icons/logic.png" alt="" draggable="false">Logic Pro</li>
+        <li><img src="icons/flstudio.png" alt="" draggable="false">FL Studio</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="devicecol">
+    <div class="device" id="device" data-state="boot">
+      <svg class="wires" viewBox="0 0 120 120" aria-hidden="true">
+        <circle class="ring" cx="60" cy="60" r="50"/>
+        <g id="wireg"></g>
+        <circle class="arc" id="arc" cx="60" cy="60" r="26" pathLength="1" stroke-dasharray="0 1"/>
+        <circle class="halo" id="halo" r="2.6"/><circle class="dot" id="dot" r="1"/>
+      </svg>
+      <button class="node" data-daw="cubase" style="--x:60;--y:10" type="button" disabled><img class="ico" src="icons/cubase.png" alt="" draggable="false"><b>Cubase</b><small>.cpr</small><span class="tag"></span></button>
+      <button class="node" data-daw="live" style="--x:103.3;--y:85" type="button" disabled><img class="ico" src="icons/live.svg" alt="" draggable="false"><b>Live</b><small>.als</small><span class="tag"></span></button>
+      <button class="node" data-daw="reaper" style="--x:16.7;--y:85" type="button" disabled><img class="ico" src="icons/reaper.png" alt="" draggable="false"><b>REAPER</b><small>.rpp</small><span class="tag"></span></button>
+      <div class="hub" id="hub">
+        <div class="h h-boot"><div class="spin" aria-hidden="true"></div><p class="s">Loading the converter</p><p class="m">~50 MB once, then cached</p></div>
+        <div class="h h-reading"><div class="spin" aria-hidden="true"></div><p class="s">Reading the project</p></div>
+        <div class="h h-empty">
+          <div class="t">Drop your project folder</div>
+          <p class="s">with its audio, or a zip of it</p>
+          <div class="row"><button class="btn" id="pickFolder" type="button">Folder</button><button class="btn" id="pickZip" type="button">Zip</button></div>
+        </div>
+        <div class="h h-loaded">
+          <div class="pname" id="pname"></div>
+          <p class="m" id="pmeta"></p>
+          <canvas id="mini" aria-hidden="true"></canvas>
+          <button class="btn primary" id="go" type="button"><span id="goTxt">Convert</span></button>
+        </div>
+        <div class="h h-busy"><div class="pct"><span id="pct">0</span><i>%</i></div><p class="m stage" id="stage">Reading</p></div>
+        <div class="h h-done">
+          <svg class="tick" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12.5l5 5L20 6.5"/></svg>
+          <a class="btn primary" id="dl" href="#" download>Download</a>
+          <p class="m" id="dmeta"></p>
+        </div>
+        <div class="h h-failed"><div class="t">Did not convert</div><p class="s">The log below says why. Pick a DAW to try again.</p></div>
+      </div>
+    </div>
+
+    <p id="status" role="status" aria-live="polite">Starting…</p>
+    <div class="opts">
+      <label id="projWrap" hidden><span>Project</span><select id="project"></select></label>
+      <label><span>Third-party plug-ins</span><select id="plugfmt">
+        <option value="source">as saved</option>
+        <option value="vst3">VST3 build</option>
+        <option value="vst2">VST2 build</option>
+      </select></label>
+      <button class="link" id="again" type="button" hidden>Open another project</button>
+    </div>
+    <div id="result"></div>
+    <details id="logwrap" hidden><summary class="mono">Log</summary><pre id="log" tabindex="0" aria-label="Conversion log"></pre></details>
+    <select id="target" class="sr" aria-label="Convert to"></select>
+    <input id="folderInput" type="file" webkitdirectory directory multiple hidden>
+    <input id="zipInput" type="file" accept=".zip" hidden>
+  </div>
+</section>
+
+<section class="sec" id="how">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>How it works</h2>
+      <p>A project is a description of a session: which files play where, at what level, through what. Daw2Daw reads that description and writes it again in another DAW's own language, in three steps, all inside this page.</p>
+    </div>
+    <ol class="steps">
+      <li>
+        <div class="figure" aria-hidden="true"><svg viewBox="0 0 300 72" preserveAspectRatio="none">
+          <path class="l" d="M0 20h300M0 36h300M0 52h300"/>
+          <rect class="kf" x="18" y="14" width="70" height="12" rx="1.5" opacity=".55"/><rect class="kf" x="104" y="14" width="40" height="12" rx="1.5" opacity=".55"/>
+          <rect class="kf" x="40" y="30" width="120" height="12" rx="1.5" opacity=".55"/><rect class="kf" x="18" y="46" width="30" height="12" rx="1.5" opacity=".55"/><rect class="kf" x="60" y="46" width="90" height="12" rx="1.5" opacity=".55"/>
+          <path class="a" d="M190 8v56"/><text x="198" y="12">READ</text>
+        </svg></div>
+        <span class="n">01</span>
+        <h3>Read</h3>
+        <p>Your project folder is read right here. Python and ffmpeg run in the page as WebAssembly, so nothing is sent anywhere, and nothing needs installing. The DAWs themselves are not needed either.</p>
+      </li>
+      <li>
+        <div class="figure" aria-hidden="true"><svg viewBox="0 0 300 72" preserveAspectRatio="none">
+          <rect class="k" x="12" y="18" width="110" height="36" rx="2"/><rect class="a" x="178" y="18" width="110" height="36" rx="6"/>
+          <path class="k" d="M24 36h86" opacity=".5"/><path class="a" d="M190 36h86" opacity=".6"/>
+          <path class="k" d="M136 36h28m-6-5l6 5-6 5"/>
+          <text x="12" y="12">.CPR</text><text x="178" y="12">.RPP</text>
+        </svg></div>
+        <span class="n">02</span>
+        <h3>Rewrite</h3>
+        <p>Every track, clip, fade, comp, automation lane and effect is written anew in the target's own format. Built-in effects become the target's own built-ins with their settings matched by measurement; third-party plug-ins keep theirs.</p>
+      </li>
+      <li>
+        <div class="figure" aria-hidden="true"><svg viewBox="0 0 300 72" preserveAspectRatio="none">
+          <path class="k" d="M12 24c10-14 18 14 28 0s18 14 28 0 18 14 28 0 18 14 28 0 18 14 28 0 18 14 28 0 18 14 28 0 18 14 28 0 18 14 28 0"/>
+          <path class="a" d="M12 48c10 14 18-14 28 0s18-14 28 0 18-14 28 0 18-14 28 0 18-14 28 0 18-14 28 0 18-14 28 0 18-14 28 0 18-14 28 0" opacity=".9"/>
+          <path class="l" d="M12 64h276"/><text x="12" y="12">ORIGINAL</text><text x="196" y="12">CONVERTED, INVERTED</text>
+        </svg></div>
+        <span class="n">03</span>
+        <h3>Check</h3>
+        <p>Before you download, the result is read back and compared with the original, item by item. And in the DAWs themselves we render both and play them against each other, one flipped: identical sound cancels out, and what is left is silence.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section class="sec" id="what">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2>What travels</h2>
+      <p>Everything you made, the way you made it. Where two DAWs differ, the nearest native thing is used, and the conversion log says exactly what was mapped to what and how close it lands.</p>
+    </div>
+    <div class="cols">
+      <div>
+        <h3>Tracks and mix</h3>
+        <ul>
+          <li><span>Audio, instrument and MIDI tracks</span><span>names · colours</span></li>
+          <li><span>Folders and groups, nested</span><span>routing kept</span></li>
+          <li><span>Volume, past +6 dB too</span><span>fader laws matched</span></li>
+          <li><span>Pan, with each DAW's pan law</span><span>measured</span></li>
+          <li><span>Sends, returns, group outputs</span></li>
+          <li><span>Mute, solo, track delay</span></li>
+          <li><span>Automation of volume, pan and plug-ins</span></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Clips and arrangement</h3>
+        <ul>
+          <li><span>Position, offset, clip gain, colours</span></li>
+          <li><span>Fades with their curves, volume curves</span></li>
+          <li><span>Reverse, rate, pitch, stretch, warp markers</span><span>native engines</span></li>
+          <li><span>Comps: lanes, takes, track versions</span><span>every take kept</span></li>
+          <li><span>MIDI notes, velocities, controllers</span></li>
+          <li><span>Tempo, ramps, time signature</span></li>
+          <li><span>Markers, regions, lead-in before bar 1</span></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Effects and plug-ins</h3>
+        <ul>
+          <li><span>Built-in EQs, dynamics, delays, reverbs, modulation</span><span>nearest native</span></li>
+          <li><span>Settings matched on renders</span><span>within 0.5 dB</span></li>
+          <li><span>VST3 and VST2 with their settings</span></li>
+          <li><span>VST2 ⇄ VST3, the other build</span><span>72 products</span></li>
+          <li><span>CLAP as its VST3 build</span></li>
+          <li><span>Melodyne edits</span><span>ARA, native</span></li>
+          <li><span>Layered instruments on one track</span></li>
+        </ul>
+      </div>
+    </div>
+    <div class="proofline">
+      <div class="big"><span>−52.3<i>dB</i></span><span class="cap">what is left after the two cancel</span></div>
+      <div>
+        <h3>How we know it is right</h3>
+        <p>We render the original in its own DAW and the converted copy in the other, then play the two together with one of them turned upside down (its polarity flipped). Wherever the two are the same, they cancel each other out completely, so whatever you can still hear is the difference between them. For a real production converted from REAPER to Live, what remains is 52 dB quieter than the music itself: the hiss of a quiet room next to a full mix. In practice, silence. Every change to the converter is checked this way, in the DAWs themselves.</p>
+      </div>
+    </div>
+    <details class="limits">
+      <summary>What doesn't travel yet</summary>
+      <ul>
+        <li><b>Cubase effects with no counterpart</b> (Vocoder, VocalChain, Pitch Correct, FX Modulator, AutoFilter, DualFilter, ToneBooster, Grungelizer, Metalizer, RingModulator, StepFilter, Tranceformer) are left out with a note. Render those tracks in Cubase first.</li>
+        <li><b>Live devices with no counterpart</b>: Corpus, Resonators, Vocoder, Beat Repeat, Looper, Spectral Resonator, Spectral Time, Erosion, Max for Live.</li>
+        <li><b>Plug-ins must be installed</b> on the machine that opens the result. Cubase 15 loads only VST3, so a VST2 arrives as its VST3 build.</li>
+        <li><b>Not sample-identical</b>: stretched or pitched clips and approximate effects use each DAW's own algorithms. They match in level and sound alike, but do not cancel exactly. Synths with random elements never repeat exactly anywhere.</li>
+        <li><b>Live's own limits</b>: one clip at a time per track (overlaps go on a copy), fader up to +6 dB (the rest on a Utility), all fade curves S-shaped, no volume curve on a clip (it becomes track automation, same sound).</li>
+        <li><b>Colours</b> snap to the nearest where a DAW has a fixed palette (Cubase project colours, Live's 70 clip colours).</li>
+        <li><b>A REAPER timeline starting before bar 1</b> is not carried to Cubase, where the project plays the same without it; it does not come back on a return trip.</li>
+        <li><b>VST2 ⇄ VST3 not yet for</b> Omnisphere, Stylus RMX, Arturia CS-80 and plug-ins not in the list; they stay in the format they were saved in.</li>
+      </ul>
+    </details>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <a class="brand" href="#" aria-label="Daw2Daw">
+        <svg viewBox="0 0 64 64" aria-hidden="true"><circle class="h" cx="32" cy="34" r="9" fill="none" stroke-width="3"/><path class="h" d="M32 25v-7M39.8 38.5l6-3.5M24.2 38.5l-6-3.5" stroke-width="3" stroke-linecap="round"/><circle class="a" cx="32" cy="13" r="5"/><circle class="n" cx="50.2" cy="44.5" r="5"/><circle class="n" cx="13.8" cy="44.5" r="5"/></svg>
+        Daw2Daw
+      </a>
+      <nav><a href="https://outhentic.eu">outhentic.eu</a><a href="mailto:info@outhentic.eu">info@outhentic.eu</a></nav>
+    </div>
+    <div>
+      <p class="fine">Free, by <a href="https://outhentic.eu">Outhentic</a>. Built on <a href="https://pyodide.org">Pyodide</a> and <a href="https://ffmpegwasm.netlify.app">ffmpeg.wasm</a> (ffmpeg is GPL/LGPL). Everything runs in this page; nothing is uploaded. First visit loads about 50 MB, which your browser then keeps. Large projects need around three times their size in memory.</p>
+      <p class="fine">Not affiliated with or endorsed by Steinberg, Cockos, Ableton, Avid, Apple or Image-Line. Cubase is a trademark of Steinberg Media Technologies GmbH, REAPER of Cockos Incorporated, Ableton and Ableton Live of Ableton AG, Pro Tools of Avid Technology, Inc., Logic Pro of Apple Inc., FL Studio of Image-Line Software. Their names and icons appear here only to say which programs' projects this converts.</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const ease = (t) => 1 - Math.pow(1 - t, 3);
+const easeIO = (t) => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+const NAMES = { reaper: 'REAPER', cubase: 'Cubase', live: 'Live' };
+const DAWS = { reaper: 'REAPER', cubase: 'Cubase', live: 'Ableton Live' };
+const fromOf = (p) => { p = p.toLowerCase(); return p.endsWith('.rpp') ? 'reaper' : p.endsWith('.als') ? 'live' : 'cubase'; };
+
+// ============================================================ the device
+// three DAWs on a ring, your project in the hub; the route lights up as it runs
+const ANG = { cubase: -90, live: 30, reaper: 150 };
+const CX = 60, CY = 60, HR = 26, NE = 40;      // hub radius; node edge, from the centre
+const pt = (daw, r) => { const a = ANG[daw] * Math.PI / 180; return [CX + r * Math.cos(a), CY + r * Math.sin(a)]; };
+const W = {};                                   // per DAW: spoke, in (node -> hub), out (hub -> node)
+(() => { const g = $('#wireg'), NS = 'http://www.w3.org/2000/svg';
+  for (const d of Object.keys(ANG)) { const [x1, y1] = pt(d, NE), [x2, y2] = pt(d, HR); W[d] = {};
+    for (const [k, a, b] of [['spoke', [x1, y1], [x2, y2]], ['in', [x1, y1], [x2, y2]], ['out', [x2, y2], [x1, y1]]]) {
+      const l = document.createElementNS(NS, 'line'); l.setAttribute('x1', a[0]); l.setAttribute('y1', a[1]); l.setAttribute('x2', b[0]); l.setAttribute('y2', b[1]);
+      l.setAttribute('class', k === 'spoke' ? 'spoke' : 'flow'); if (k !== 'spoke') { l.setAttribute('pathLength', '1'); l.setAttribute('stroke-dasharray', '0 1'); }
+      g.appendChild(l); W[d][k] = l; } } })();
+const Dev = {
+  el: $('#device'), nodes: {}, state: 'boot', from: null, to: null, data: null, p: 0, ps: 0, demo: { i: 0, t0: 0 }, idleAt: 0,
+  PAIRS: [['cubase', 'reaper'], ['reaper', 'live'], ['live', 'cubase'], ['cubase', 'live'], ['live', 'reaper'], ['reaper', 'cubase']],
+  init() { document.querySelectorAll('.node').forEach((n) => { this.nodes[n.dataset.daw] = n; n.onclick = () => this.pick(n.dataset.daw); }); this.demo.t0 = performance.now(); },
+  set(state) { if (state === 'reading' || state === 'empty') { this.from = this.to = null; } this.state = state; this.el.dataset.state = state; this.paintNodes(); },
+  paintNodes() {
+    const choosing = this.state === 'loaded' || this.state === 'done' || this.state === 'failed';
+    for (const [d, n] of Object.entries(this.nodes)) {
+      const src = d === this.from, to = d === this.to;
+      n.classList.toggle('src', src && this.state !== 'boot' && this.state !== 'empty');
+      n.classList.toggle('to', to && (this.state === 'loaded' || this.state === 'busy'));
+      n.classList.toggle('lit', to && this.state === 'done');
+      n.classList.toggle('dst', choosing && !src);
+      n.classList.toggle('dim', this.state === 'busy' && !src && !to);
+      n.disabled = !(choosing && !src);
+      n.querySelector('.tag').textContent = src ? 'from' : to ? (this.state === 'done' ? 'done' : 'to') : '';
+    }
+  },
+  load(from) { this.from = from; this.to = null; const order = { reaper: ['cubase', 'live'], cubase: ['reaper', 'live'], live: ['reaper', 'cubase'] }[from];
+    const sel = $('#target'); sel.innerHTML = ''; for (const k of order) { const o = document.createElement('option'); o.value = k; o.textContent = DAWS[k]; sel.appendChild(o); }
+    this.pick(order[0], true); },
+  pick(daw, quiet) { if (daw === this.from || this.state === 'busy') return;
+    this.to = daw; $('#target').value = daw; $('#goTxt').textContent = 'Convert to ' + NAMES[daw];
+    if (this.state === 'done' || this.state === 'failed') { this.set('loaded'); if (!quiet) setStatus(`Ready to convert to ${DAWS[daw]}.`); } else this.paintNodes(); },
+  // the wires, each frame
+  dash(l, k, o) { l.setAttribute('stroke-dasharray', `${clamp(k, 0, 1)} 1`); l.style.opacity = o == null ? 1 : o; },
+  dotAt(daw, r, o) { const [x, y] = pt(daw, r); for (const id of ['dot', 'halo']) { const e = $('#' + id); e.setAttribute('cx', x); e.setAttribute('cy', y); }
+    $('#dot').style.opacity = o; $('#halo').style.opacity = o * .22; },
+  clear() { for (const d in W) { this.dash(W[d].in, 0, 0); this.dash(W[d].out, 0, 0); } this.dash($('#arc'), 0, 0); $('#dot').style.opacity = 0; $('#halo').style.opacity = 0; },
+  frame(now) {
+    const s = this.state;
+    if (s === 'boot' || s === 'empty') {                       // the six directions, one after another
+      if (RM) { this.clear(); const [a, b] = this.PAIRS[0]; this.dash(W[a].in, 1, .6); this.dash($('#arc'), 1, .6); this.dash(W[b].out, 1, .6); return; }
+      if (document.hidden || !inView(this.el)) { this.demo.t0 = now; return; }
+      const u = now - this.demo.t0, [a, b] = this.PAIRS[this.demo.i % 6];
+      const IN = 900, HUB = 500, OUT = 900, LIT = 500, REST = 700, T = IN + HUB + OUT + LIT + REST;
+      if (u >= T) { this.demo.i++; this.demo.t0 = now; this.nodes[b].classList.remove('flash'); return; }
+      this.clear();
+      const fadeAll = u > IN + HUB + OUT + LIT ? 1 - (u - IN - HUB - OUT - LIT) / REST : 1;
+      if (u < IN) { const k = easeIO(u / IN); this.dash(W[a].in, k, 1); this.dotAt(a, NE - (NE - HR) * k, 1); }
+      else if (u < IN + HUB) { const k = easeIO((u - IN) / HUB); this.dash(W[a].in, 1, 1); this.dash($('#arc'), k, 1); this.dotAt(a, HR, 1 - k); }
+      else if (u < IN + HUB + OUT) { const k = easeIO((u - IN - HUB) / OUT); this.dash(W[a].in, 1, 1 - k * .5); this.dash($('#arc'), 1, 1); this.dash(W[b].out, k, 1); this.dotAt(b, HR + (NE - HR) * k, 1); }
+      else { this.dash(W[a].in, 1, .5 * fadeAll); this.dash($('#arc'), 1, fadeAll); this.dash(W[b].out, 1, fadeAll); this.nodes[b].classList.toggle('flash', u < IN + HUB + OUT + LIT); }
+      return;
+    }
+    this.clear();
+    if (!this.from) return;
+    this.dash(W[this.from].in, 1, 1);
+    if (s === 'loaded' && this.to) { this.dash(W[this.to].out, 1, .3); }
+    if (s === 'busy') {
+      this.ps += (this.p - this.ps) * .08; if (Math.abs(this.p - this.ps) < .0005) this.ps = this.p;
+      this.dash($('#arc'), this.ps, 1); this.dash(W[this.to].out, this.ps, 1);
+      if (!RM) { const k = (now % 1600) / 1600;                  // a pulse circling the route while it works
+        if (k < .4) this.dotAt(this.from, NE - (NE - HR) * (k / .4), 1); else if (k < .6) this.dotAt(this.from, HR, 0); else this.dotAt(this.to, HR + (NE - HR) * ((k - .6) / .4), 1); }
+    }
+    if (s === 'done') { this.dash($('#arc'), 1, 1); this.dash(W[this.to].out, 1, 1); }
+  },
+};
+let seen = new Map(); const vo = new IntersectionObserver((es) => es.forEach((e) => seen.set(e.target, e.isIntersecting)));
+const inView = (el) => { if (!seen.has(el)) { vo.observe(el); seen.set(el, true); } return seen.get(el) !== false; };
+Dev.init();
+(function loop(now) { Dev.frame(now); requestAnimationFrame(loop); })(performance.now());
+
+// the project drawn small: its tracks and clips
+function drawMini(d) {
+  const cv = $('#mini'), r = cv.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
+  cv.width = Math.max(1, r.width * dpr); cv.height = Math.max(1, r.height * dpr); const x = cv.getContext('2d'); x.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const Wd = r.width, Hd = r.height; x.clearRect(0, 0, Wd, Hd);
+  if (!d || !d.tracks || !d.tracks.length) return;
+  const ink = getComputedStyle(document.documentElement).getPropertyValue('--ink').trim();
+  const n = Math.min(d.tracks.length, 24), lh = Hd / n, end = Math.max(d.end || 1, 1) * 1.02;
+  for (let i = 0; i < n; i++) { const t = d.tracks[i], y = i * lh;
+    for (const c of t.clips) { const x0 = c[0] / end * Wd, w = Math.max(1, c[1] / end * Wd);
+      x.globalAlpha = c[4] ? .18 : (c[3] ? .55 : .75); x.fillStyle = ink; x.fillRect(x0, y + lh * .18, w, Math.max(1, lh * .64)); } }
+  x.globalAlpha = 1;
+}
+
+// ============================================================ the converter (in a worker)
+const statusEl = $('#status'), logEl = $('#log'), resultEl = $('#result');
+const SKIP_DIRS = ['auto saves', 'backups', 'backup', 'ableton project info', '__macosx', 'images', 'track pictures', '.git'];
+const SKIP_EXT = ['.peak', '.reapeaks', '.csh', '.ds_store'];
+let ready = false, busy = false, url = null, pending = null, outline = null;
+const WAIT = 'The converter is still loading. Your project will be read as soon as it is ready.';
+
+function setStatus(text, cls) { statusEl.textContent = text; statusEl.className = cls || ''; if (!cls && (!ready || busy)) statusEl.classList.add('working'); }
+
+const Engine = { el: $('#engine'), segs: [...document.querySelectorAll('#engine .seg i')],
+  set(text) { const t = (text || '').toLowerCase(); const n = /python/.test(t) ? 0 : /ffmpeg/.test(t) ? 1 : /converter/.test(t) ? 2 : -1;
+    if (n < 0) return; this.segs.forEach((s, i) => { s.className = i < n ? 'on' : i === n ? 'go' : ''; });
+    $('#engineTxt').textContent = ['Loading Python', 'Loading ffmpeg', 'Loading converter'][n]; },
+  ready() { this.segs.forEach((s) => { s.className = 'on'; }); this.el.classList.add('ready'); $('#engineTxt').textContent = 'Ready'; } };
+
+// progress, read off the converter's own log
+const UI = {
+  shown: 0,
+  show() { this.shown = 0; Dev.p = Dev.ps = 0; Dev.set('busy'); this.set(0, 'Reading', ''); },
+  set(pct, stage, eta) {
+    pct = Math.max(this.shown, Math.min(100, pct)); this.shown = pct; Dev.p = pct / 100;
+    $('#pct').textContent = Math.floor(pct); if (stage) $('#stage').textContent = stage;
+    if (busy) statusEl.textContent = (stage || 'Converting') + (eta ? `, about ${eta} left` : '');
+  },
+  fromLog(text) {
+    if (Dev.state !== 'busy') return;
+    const at2 = text.lastIndexOf('step 2 of 2'); const checking = at2 >= 0;
+    if (checking) text = text.slice(at2);
+    const lines = text.split('\n').filter((l) => /\]\s+\d+%/.test(l));
+    if (checking && !lines.length) { this.set(85, 'Checking against the original', ''); return; }
+    const last = lines[lines.length - 1]; if (!last) return;
+    const m = last.match(/\[[#\-]*\]\s+(\d+)%\s*(.*)$/); if (!m) return;
+    let rest = m[2].trim(), eta = '';
+    const e = rest.match(/~\s*(.+?)\s+left\s*$/); if (e) { eta = e[1]; rest = rest.slice(0, e.index).trim(); }
+    const pre = (last.match(/^\s*(.*?)\s*\[[#\-]*\]/) || [, ''])[1].trim();
+    const label = [pre, rest].filter(Boolean).join('  ').replace(/\s{2,}/g, ' · ');
+    this.set(checking ? 85 + 0.15 * +m[1] : 0.85 * +m[1], label.charAt(0).toUpperCase() + label.slice(1), checking ? '' : eta);
+  },
+};
+
+let logText = '';
+function addLog(t) {
+  $('#logwrap').hidden = false;
+  for (const ch of t.split(/(\r|\n)/)) { if (ch === '\r') logText = logText.slice(0, logText.lastIndexOf('\n') + 1); else logText += ch; }
+  logEl.textContent = logText; logEl.scrollTop = logEl.scrollHeight;
+  UI.fromLog(logText);
+}
+
+const worker = new Worker('worker.js?v=62eaba4d20');
+worker.onmessage = (e) => {
+  const m = e.data;
+  if (m.type === 'status') { setStatus(m.text); Engine.set(m.text); }
+  else if (m.type === 'ready') { ready = true; Engine.ready(); Dev.set('empty'); setStatus('Ready. Drop a project folder or a zip anywhere on this page.');
+    if (pending) { const run = pending; pending = null; run(); } }
+  else if (m.type === 'log') addLog(m.text);
+  else if (m.type === 'projects') showProjects(m.list);
+  else if (m.type === 'outline') { if (m.project === $('#project').value) { try { outline = JSON.parse(m.json); } catch (_) { outline = null; } setProjectHead(outline); } }
+  else if (m.type === 'done') done(m);
+  else if (m.type === 'failed') { busy = false; Dev.set('failed'); $('#logwrap').open = true; setStatus('The conversion did not finish. The log says why.', 'bad'); }
+  else if (m.type === 'error') { busy = false; addLog('\n' + m.text + '\n'); $('#logwrap').open = true;
+    if (Dev.state === 'busy') Dev.set('failed'); else if (Dev.state === 'reading') Dev.set('empty');
+    setStatus(ready ? 'Something went wrong. The log below has the details.' : m.text, 'bad'); }
+};
+
+function skip(path) { const parts = path.toLowerCase().split('/');
+  if (parts.slice(0, -1).some((p) => SKIP_DIRS.includes(p))) return true;
+  const name = parts[parts.length - 1]; return SKIP_EXT.some((x) => name.endsWith(x)); }
+
+async function sendFiles(list) {
+  if (!ready) { pending = () => sendFiles(list); setStatus(WAIT); return; }
+  list = list.filter((f) => !skip(f.path));
+  if (!list.length) { setStatus('No files found there.', 'bad'); return; }
+  const mb = list.reduce((s, f) => s + f.file.size, 0) / 1e6;
+  setStatus(`Reading ${list.length} files, ${mb.toFixed(0)} MB…`);
+  const files = [], transfer = [];
+  resetRun(); Dev.set('reading');
+  for (const f of list) { const data = await f.file.arrayBuffer(); files.push({ path: f.path, data }); transfer.push(data); }
+  worker.postMessage({ type: 'load', files }, transfer);
+}
+async function sendZip(file) {
+  if (!ready) { pending = () => sendZip(file); setStatus(WAIT); return; }
+  setStatus(`Reading ${file.name}, ${(file.size / 1e6).toFixed(0)} MB…`);
+  resetRun(); Dev.set('reading');
+  const zip = await file.arrayBuffer(); worker.postMessage({ type: 'load', zip }, [zip]);
+}
+function resetRun() {
+  logText = ''; logEl.textContent = ''; $('#logwrap').hidden = true; $('#logwrap').open = false;
+  resultEl.style.display = 'none'; resultEl.innerHTML = '';
+  if (url) { URL.revokeObjectURL(url); url = null; }
+}
+
+function setProjectHead(d) {
+  const name = $('#project').value.split('/').pop(); $('#pname').textContent = name; $('#pname').title = name;
+  const ok = d && d.tracks && d.tracks.length;
+  const len = ok ? `${Math.floor(d.end / 60)}:${String(Math.round(d.end % 60)).padStart(2, '0')}` : '';
+  $('#pmeta').textContent = ok ? `${d.tracks.length + (d.more || 0)} tracks · ${Math.round(d.bpm)} bpm · ${len}` : (d ? 'read' : 'reading…');
+  drawMini(ok ? d : null);
+}
+function showProjects(list) {
+  const sel = $('#project'); sel.innerHTML = '';
+  if (!list.length) { Dev.set('empty'); setStatus('No .cpr, .rpp or .als project in there.', 'bad'); return; }
+  for (const p of list) { const o = document.createElement('option'); o.value = p; o.textContent = p; sel.appendChild(o); }
+  $('#projWrap').hidden = list.length < 2; $('#again').hidden = false;
+  sel.onchange = () => selectProject();
+  selectProject();
+  setStatus(list.length === 1 ? `Choose where it goes: ${targetsText()}.` : `${list.length} projects found. Pick one, then where it goes.`);
+}
+function targetsText() { const o = [...$('#target').options]; return o.map((x) => x.textContent).join(' or '); }
+function selectProject() {
+  outline = null; Dev.data = null; Dev.load(fromOf($('#project').value)); Dev.set('loaded'); setProjectHead(null);
+  worker.postMessage({ type: 'outline', project: $('#project').value });
+}
+$('#target').onchange = () => Dev.pick($('#target').value);
+$('#go').onclick = () => {
+  if (busy || !Dev.to) return;
+  busy = true; resetRun(); UI.show(); setStatus('Converting…');
+  worker.postMessage({ type: 'convert', project: $('#project').value, target: $('#target').value, pluginFormat: $('#plugfmt').value });
+};
+
+function done(m) {
+  busy = false; UI.set(100, 'Done', '');
+  const blob = new Blob([m.zip], { type: 'application/zip' }); url = URL.createObjectURL(blob);
+  const a = $('#dl'); a.href = url; a.download = m.name; a.textContent = `Download ${NAMES[Dev.to]} project`;
+  $('#dmeta').textContent = `${m.name} · ${(blob.size / 1e6).toFixed(1)} MB`;
+  setTimeout(() => Dev.set('done'), 500);
+  resultEl.innerHTML = '';
+  const hint = document.createElement('p'); hint.className = 'hint';
+  hint.innerHTML = '<strong>Unzip the download first</strong>, then open the project inside the unzipped folder. Opened straight from the zip, the DAW gets the project without its audio.';
+  resultEl.appendChild(hint);
+  const m2 = logText.match(/(\d+) file\(s\) are not on this machine at all[^:]*: ([^\n]*)/);
+  if (m2) {
+    const w = document.createElement('p'); w.className = 'warn';
+    const paths = m2[2].split('; ').filter(Boolean), names = paths.map((p) => p.split(/[\\/]/).pop());
+    const dirs = [...new Set(paths.map((p) => p.replace(/[\\/][^\\/]*$/, '')))];
+    const vid = names.filter((n) => /\.(mp4|mov|avi|mkv|m4v|wmv)$/i.test(n)).length, kind = vid === names.length ? 'video' : vid ? 'media' : 'audio';
+    w.textContent = `${m2[1]} ${kind} file(s) the project uses are outside the folder you dropped: ${names.slice(0, 8).join(', ')}${names.length > 8 ? ', …' : ''}. ` +
+      `The project expects them in ${dirs.slice(0, 2).join(' and ')}${dirs.length > 2 ? ' and other folders' : ''}. They will show as missing in the converted project. ` +
+      'To include them, drop the folder above that holds both the project and them, or a zip of it.';
+    resultEl.appendChild(w);
+  }
+  resultEl.style.display = 'block';
+  setStatus(m.checked === null ? 'Converted. A Live Set has no automatic check; the log lists anything that did not come across.' :
+            m.checked ? 'Converted, read back and compared with the original: no differences.' :
+            'Converted. The check lists what differs; see the log.', m.checked ? 'ok' : '');
+  a.click();
+}
+
+// ---- getting files in: the buttons, and a drop anywhere on the page
+$('#pickFolder').onclick = () => $('#folderInput').click();
+$('#pickZip').onclick = () => $('#zipInput').click();
+$('#again').onclick = () => $('#folderInput').click();
+$('#folderInput').onchange = (e) => sendFiles([...e.target.files].map((f) => ({ path: f.webkitRelativePath || f.name, file: f })));
+$('#zipInput').onchange = (e) => { if (e.target.files[0]) sendZip(e.target.files[0]); };
+addEventListener('resize', () => { if (outline) drawMini(outline); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (outline) drawMini(outline); });
+
+let dragDepth = 0;
+const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+addEventListener('dragenter', (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; Dev.el.classList.add('over');
+  const r = Dev.el.getBoundingClientRect(); if (r.top > innerHeight * .7 || r.bottom < 0) Dev.el.scrollIntoView({ behavior: RM ? 'auto' : 'smooth', block: 'center' }); });
+addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+addEventListener('dragleave', (e) => { if (!hasFiles(e)) return; dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) Dev.el.classList.remove('over'); });
+addEventListener('drop', async (e) => {
+  if (!hasFiles(e)) return; e.preventDefault(); dragDepth = 0; Dev.el.classList.remove('over');
+  if (busy) return;
+  const items = [...e.dataTransfer.items].map((i) => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+  if (items.length === 1 && items[0].isFile && /\.zip$/i.test(items[0].name)) { items[0].file((f) => sendZip(f)); return; }
+  if (items.length && items.every((it) => it.isFile) && items.some((it) => /\.(rpp|cpr|bak|als)$/i.test(it.name))) {
+    setStatus('That is only the project file. Drop the whole project folder, or a zip of it, so its audio comes along.', 'bad'); return; }
+  const out = [];
+  async function walk(entry, prefix) {
+    if (entry.isFile) { const file = await new Promise((res, rej) => entry.file(res, rej)); out.push({ path: prefix + entry.name, file }); }
+    else if (entry.isDirectory) { if (SKIP_DIRS.includes(entry.name.toLowerCase())) return; const reader = entry.createReader();
+      for (;;) { const batch = await new Promise((res, rej) => reader.readEntries(res, rej)); if (!batch.length) break;
+        for (const child of batch) await walk(child, prefix + entry.name + '/'); } }
+  }
+  setStatus('Reading the folder…'); for (const it of items) await walk(it, ''); sendFiles(out);
+});
+</script>
+</body>
+</html>
